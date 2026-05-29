@@ -1,6 +1,6 @@
 {
   "name": "sap-roadmap-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server for SAP Road Map Explorer search and filters behind SAP authentication",
   "main": "dist/mcp-server.js",
   "types": "dist/mcp-server.d.ts",
