@@ -1,6 +1,6 @@
 {
   "name": "sap-api-hub-mcp",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "MCP server for SAP Business Accelerator Hub catalog, specs, and documentation behind SAP authentication",
   "author": "marianfoo",
   "license": "Apache-2.0",

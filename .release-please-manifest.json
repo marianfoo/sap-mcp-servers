@@ -1,6 +1,6 @@
 {
-  "packages/auth": "0.1.1",
-  "packages/api-hub": "0.1.2",
+  "packages/auth": "0.1.2",
+  "packages/api-hub": "0.1.3",
   "packages/roadmap": "0.1.2",
-  "packages/notes": "0.3.2"
+  "packages/notes": "0.3.3"
 }
