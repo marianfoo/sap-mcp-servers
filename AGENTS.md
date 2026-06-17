@@ -48,7 +48,7 @@ npm run build              # auth first, then the three servers
 npm run install:browsers   # one-time: Chromium for Playwright (also auto-runs via roadmap postinstall)
 ```
 
-Node **>= 18** (developed on 22). Playwright Chromium is needed for the login flows.
+Node **>= 22.12.0**. Playwright Chromium is needed for the login flows.
 
 ## Everyday commands (run from repo root)
 
@@ -142,7 +142,7 @@ path is what drives the version.
 ### CI — `.github/workflows/ci.yml`
 
 On every PR and push to `main`: `npm ci` → `npm run build` (compiles all four with tsc = the real
-type-check) → `npm run typecheck`, on Node 20 and 22. The servers' own `test` scripts hit **live SAP**
+type-check) → `npm run typecheck`, on Node 22.12.0 and the latest Node 22.x. The servers' own `test` scripts hit **live SAP**
 and are deliberately **not** run in CI. PRs also get their commit messages linted (release-please's
 own PRs are skipped).
 

@@ -15,7 +15,7 @@
     "url": "https://github.com/marianfoo/sap-mcp-servers/issues"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.12.0"
   },
   "workspaces": [
     "packages/auth",
