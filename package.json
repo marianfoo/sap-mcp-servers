@@ -39,6 +39,6 @@
     "@commitlint/config-conventional": "^21.0.2",
     "husky": "^9.1.7",
     "rimraf": "^6.0.0",
-    "typescript": "^5.8.0"
+    "typescript": "^6.0.3"
   }
 }
