@@ -30,6 +30,7 @@
     "test:mcp:debug": "npm run build && LOG_LEVEL=debug DOCKER_ENV=true node test/test-mcp-server.js",
     "test:api": "npm run build && node test/test-sap-api.js",
     "test:flow": "npm run build && node test/test-full-flow.js",
+    "test:unit": "npm run build && node --test test/*.unit.test.js",
     "test": "npm run test:auth && npm run test:api && npm run test:mcp",
     "debug:container": "./debug-container.sh",
     "clean": "rimraf dist"
