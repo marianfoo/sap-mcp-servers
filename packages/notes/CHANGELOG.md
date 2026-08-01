@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.3...sap-note-search-mcp-v0.3.4) (2026-08-01)
+
+
+### Bug Fixes
+
+* **notes:** restore authenticated backend access ([#32](https://github.com/marianfoo/sap-mcp-servers/issues/32)) ([ff8e497](https://github.com/marianfoo/sap-mcp-servers/commit/ff8e497c643ef268161e480de4d73a9a4ff9e3a9))
+
 ## [0.3.3](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.2...sap-note-search-mcp-v0.3.3) (2026-06-02)
 
 
