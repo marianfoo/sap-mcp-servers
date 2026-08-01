@@ -1,7 +1,23 @@
 import type { ServerConfig } from './types.js';
 import { logger } from './logger.js';
 import { existsSync } from 'fs';
-import { chromium, type Browser, type BrowserContextOptions, type Page } from 'playwright';
+import {
+  chromium,
+  request,
+  type APIRequestContext,
+  type Browser,
+  type BrowserContextOptions,
+  type Page
+} from 'playwright';
+import {
+  SAP_NOTES_DETAIL_PATH,
+  SAP_NOTES_SEARCH_PATH,
+  buildSapNotesSearchParams,
+  extractSapNotePayload,
+  extractSapNotesBackendError,
+  isAuthenticationBootstrapResponse,
+  mapSapNotesSearchResponse
+} from './sap-notes-backend.js';
 
 export interface SapNoteResult {
   id: string;
@@ -102,8 +118,173 @@ export class SapNotesApiClient {
   private coveoTokenCache: { token: string; expiresAt: number } | null = null;
   private readonly COVEO_TOKEN_TTL = 14 * 60 * 1000; // Cache for 14 minutes (conservative)
 
+  // SAP for Me backend requests use Playwright's authenticated HTTP context. Unlike
+  // native fetch, it can initialize directly from Playwright storage state and receives
+  // backend JSON without retaining a browser process.
+  private backendRequestContext: APIRequestContext | null = null;
+  private backendRequestContextPromise: Promise<APIRequestContext> | null = null;
+
   constructor(config: ServerConfig) {
     this.config = config;
+  }
+
+  private async loadBackendStorageState(
+    token: string
+  ): Promise<Exclude<BrowserContextOptions['storageState'], string | undefined> | undefined> {
+    if (this.config.ssoStorageStateFile && existsSync(this.config.ssoStorageStateFile)) {
+      try {
+        const { readFileSync } = await import('fs');
+        const rawState = JSON.parse(readFileSync(this.config.ssoStorageStateFile, 'utf-8'));
+        const cookies = this.sanitizeCookiesForStorageState(
+          Array.isArray(rawState.cookies) ? rawState.cookies : []
+        );
+
+        if (cookies.length > 0) {
+          return {
+            cookies,
+            origins: Array.isArray(rawState.origins) ? rawState.origins : []
+          };
+        }
+      } catch (error) {
+        logger.warn(
+          `Failed to load SAP SSO storage state for backend requests: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+
+    const tokenState = await this.buildStorageStateFromTokenCache(token);
+    return typeof tokenState === 'object' ? tokenState : undefined;
+  }
+
+  private async ensureBackendRequestContext(token: string): Promise<APIRequestContext> {
+    if (this.backendRequestContext) return this.backendRequestContext;
+    if (this.backendRequestContextPromise) return this.backendRequestContextPromise;
+
+    this.backendRequestContextPromise = (async () => {
+      const storageState = await this.loadBackendStorageState(token);
+      if (!storageState) {
+        throw new Error('SESSION_EXPIRED: no SAP cookies were available for backend requests');
+      }
+
+      return request.newContext({
+        baseURL: 'https://me.sap.com',
+        storageState,
+        ignoreHTTPSErrors: true,
+        extraHTTPHeaders: { Accept: 'application/json' },
+        timeout: 30000
+      });
+    })();
+
+    try {
+      this.backendRequestContext = await this.backendRequestContextPromise;
+      return this.backendRequestContext;
+    } finally {
+      this.backendRequestContextPromise = null;
+    }
+  }
+
+  private async invalidateBackendRequestContext(): Promise<void> {
+    const context = this.backendRequestContext;
+    this.backendRequestContext = null;
+    if (context) {
+      await context.dispose({ reason: 'SAP Notes session invalidated' }).catch(() => {});
+    }
+  }
+
+  private async fetchBackendJson(
+    path: string,
+    token: string,
+    params?: URLSearchParams | Record<string, string>
+  ): Promise<unknown> {
+    const context = await this.ensureBackendRequestContext(token);
+    const response = await context.get(path, { params, failOnStatusCode: false });
+
+    let body = '';
+    try {
+      body = await response.text();
+      const status = response.status();
+      const contentType = response.headers()['content-type'];
+
+      if (isAuthenticationBootstrapResponse(status, contentType, body)) {
+        await this.invalidateBackendRequestContext();
+        throw new Error(`SESSION_EXPIRED: SAP backend rejected the session for ${path}`);
+      }
+      if (!response.ok()) {
+        throw new Error(`SAP backend request failed (${status}) for ${path}`);
+      }
+
+      try {
+        return JSON.parse(body);
+      } catch {
+        throw new Error(`SAP backend returned non-JSON content for ${path}`);
+      }
+    } finally {
+      await response.dispose().catch(() => {});
+    }
+  }
+
+  private buildNoteDetail(sapNote: any, noteId: string): SapNoteDetail {
+    const header = sapNote.Header || {};
+    const detail: SapNoteDetail = {
+      id: header.Number?.value || noteId,
+      title: sapNote.Title?.value || `SAP Note ${noteId}`,
+      summary: header.Type?.value || 'SAP Knowledge Base Article',
+      content: sapNote.LongText?.value || 'No content available',
+      language: header.Language?.value || 'EN',
+      releaseDate: header.ReleasedOn?.value || 'Unknown',
+      component: header.SAPComponentKey?.value,
+      componentText: header.SAPComponentKeyText?.value,
+      priority: header.Priority?.value,
+      category: header.Category?.value,
+      version: header.Version?.value != null ? String(header.Version.value) : undefined,
+      status: header.Status?.value,
+      url: `https://me.sap.com/notes/${header.Number?.value || noteId}`
+    };
+
+    this.extractEnrichedMetadata(sapNote, detail);
+    return detail;
+  }
+
+  private async searchViaBackend(
+    query: string,
+    token: string,
+    maxResults: number
+  ): Promise<SapNoteSearchResponse> {
+    const payload = await this.fetchBackendJson(
+      SAP_NOTES_SEARCH_PATH,
+      token,
+      buildSapNotesSearchParams(query, maxResults)
+    );
+    const result = mapSapNotesSearchResponse(payload, query);
+    logger.info(`✅ Found ${result.results.length} SAP Note(s) via SAP for Me backend`);
+    return result;
+  }
+
+  private async getNoteViaBackend(noteId: string, token: string): Promise<SapNoteDetail | null> {
+    const payload = await this.fetchBackendJson(
+      SAP_NOTES_DETAIL_PATH,
+      token,
+      { q: noteId }
+    );
+    const sapNote = extractSapNotePayload(payload);
+    if (!sapNote) {
+      const backendError = extractSapNotesBackendError(payload);
+      if (backendError?.code === 'DOES_NOT_EXIST') {
+        logger.info(`SAP Note ${noteId} does not exist`);
+        return null;
+      }
+
+      const detail = [backendError?.code, backendError?.message].filter(Boolean).join(': ');
+      throw new Error(
+        detail
+          ? `SAP backend Detail error: ${detail}`
+          : 'SAP backend Detail response did not contain Response.SAPNote'
+      );
+    }
+
+    const detail = this.buildNoteDetail(sapNote, noteId);
+    logger.info(`✅ Retrieved SAP Note ${noteId} via SAP for Me backend`);
+    return detail;
   }
 
   /**
@@ -114,6 +295,16 @@ export class SapNotesApiClient {
     logger.debug(`📊 Search parameters: query="${query}", maxResults=${maxResults}`);
 
     try {
+      // Primary path: SAP for Me's authenticated OData search. This avoids the
+      // Coveo bootstrap/token flow and returns stable backend data directly.
+      try {
+        return await this.searchViaBackend(query, token, maxResults);
+      } catch (backendError) {
+        const message = backendError instanceof Error ? backendError.message : String(backendError);
+        if (message.includes('SESSION_EXPIRED')) throw backendError;
+        logger.warn(`⚠️ SAP for Me backend search failed, falling back to Coveo: ${message}`);
+      }
+
       // Try primary Coveo search approach
       try {
         logger.debug('🔍 Attempting primary Coveo search...');
@@ -273,6 +464,17 @@ export class SapNotesApiClient {
     logger.info(`📄 Fetching SAP Note: ${noteId}`);
 
     try {
+      // Primary path: the authenticated SAP for Me Detail endpoint. Session errors
+      // must propagate so the server can invalidate auth and retry with fresh state.
+      try {
+        const backendNote = await this.getNoteViaBackend(noteId, token);
+        if (backendNote) return backendNote;
+      } catch (backendError) {
+        const message = backendError instanceof Error ? backendError.message : String(backendError);
+        if (message.includes('SESSION_EXPIRED')) throw backendError;
+        logger.warn(`⚠️ SAP for Me backend Detail failed, trying legacy fallbacks: ${message}`);
+      }
+
       // Try Playwright-based raw notes API first (most likely to get actual content)
       try {
         logger.info(`🎭 Trying Playwright approach for note ${noteId}`);
@@ -283,6 +485,7 @@ export class SapNotesApiClient {
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('SESSION_EXPIRED')) throw error;
         logger.warn(`⚠️ Playwright approach failed: ${errorMessage}, trying HTTP fallbacks`);
       }
 
@@ -298,6 +501,7 @@ export class SapNotesApiClient {
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes('SESSION_EXPIRED')) throw error;
         logger.debug(`Raw notes HTTP API failed: ${errorMessage}, trying OData fallbacks`);
       }
 
@@ -318,6 +522,7 @@ export class SapNotesApiClient {
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
+          if (errorMessage.includes('SESSION_EXPIRED')) throw error;
           logger.warn(`⚠️ Endpoint ${endpoint} failed: ${errorMessage}`);
         }
       }
@@ -1001,6 +1206,7 @@ export class SapNotesApiClient {
    * Cleanup method - call this when shutting down the server
    */
   async cleanup(): Promise<void> {
+    await this.invalidateBackendRequestContext();
     if (this.browser) {
       logger.debug('🧹 Closing persistent browser session');
       await this.browser.close().catch(() => {});
@@ -1415,7 +1621,12 @@ export class SapNotesApiClient {
     
     try {
       const jsonData = JSON.parse(responseText);
-      
+
+      const sapNote = extractSapNotePayload(jsonData);
+      if (sapNote) {
+        return this.buildNoteDetail(sapNote, noteId);
+      }
+
       // Check if we have a valid note response
       if (jsonData && (jsonData.SapNote || jsonData.id || jsonData.noteId)) {
         return {
@@ -1435,26 +1646,17 @@ export class SapNotesApiClient {
       logger.debug('Raw note response is not JSON, checking for HTML redirect/content');
     }
 
-    // Check if this is a redirect page that indicates the note exists
-    if (responseText.includes('fragmentAfterLogin') || responseText.includes('document.cookie')) {
-      logger.debug('Detected redirect page, note likely exists but requires browser navigation');
-      
-      // If we got a response for a valid note ID, create a basic result
-      if (noteId && noteId.match(/^\d{6,8}$/)) {
-        return {
-          id: noteId,
-          title: `SAP Note ${noteId}`,
-          summary: 'Note found via raw API - full content requires browser access',
-          content: `This SAP Note exists but its content requires browser navigation to access.\n\nTo view the complete note content:\n1. Visit: https://launchpad.support.sap.com/#/notes/${noteId}\n2. Or access through: https://me.sap.com with your SAP credentials\n\nThe note was successfully located but content extraction requires additional authentication steps.`,
-          language: 'EN',
-          releaseDate: 'Unknown',
-          url: `https://launchpad.support.sap.com/#/notes/${noteId}`
-        };
-      }
+    // SAP returns a 200 HTML bootstrap page for invalid sessions. Treating it as
+    // a note hid auth expiry from the server retry and produced false success.
+    if (isAuthenticationBootstrapResponse(
+      response.status,
+      response.headers.get('content-type') ?? undefined,
+      responseText
+    )) {
+      throw new Error('SESSION_EXPIRED: raw Detail endpoint returned the SAP login bootstrap');
     }
 
-    // Fallback to HTML parsing
-    return this.parseHtmlForNoteDetail(responseText, noteId);
+    return null;
   }
 
   /**
