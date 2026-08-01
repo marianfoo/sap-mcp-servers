@@ -1,7 +1,13 @@
 import type { ServerConfig } from './types.js';
+import type { SapWebAuthenticator } from '@marianfoo/sap-mcp-auth';
 import { logger } from './logger.js';
 import { existsSync } from 'fs';
 import { chromium, type Browser, type BrowserContextOptions, type Page } from 'playwright';
+
+/** SAP for Me backend paths (called in-page via runInSession). */
+const NOTES_DETAIL_PATH = '/backend/raw/sapnotes/Detail';
+const NOTES_SEARCH_PATH =
+  '/backend/raw/core/W7LegacyProxyVerticle/odata/sfm/snogwsmynotes/SAPNotes';
 
 export interface SapNoteResult {
   id: string;
@@ -79,14 +85,24 @@ export interface SapNoteDetail {
   };
   attachments?: Array<{ filename: string; url?: string }>;
   downloadUrl?: string;
+  /** Ready-to-use PDF ("Print") URL for the note, when SAP for Me provides one. */
+  pdfUrl?: string;
 }
 
 /**
- * SAP Notes API Client - Uses Coveo Search API
- * SAP uses Coveo as their search infrastructure for SAP Notes
+ * SAP Notes API Client.
+ *
+ * Primary data path: the SAP for Me backend JSON endpoints, called *inside* a live authenticated
+ * browser page via `SapWebAuthenticator.runInSession()`. Those endpoints return a JS-bootstrap HTML
+ * stub to plain HTTP clients (cookie header included) and only serve JSON to a real logged-in
+ * browser, so in-page `fetch` is the only reliable way to reach them:
+ *   - search  : /backend/raw/core/W7LegacyProxyVerticle/odata/sfm/snogwsmynotes/SAPNotes
+ *   - content : /backend/raw/sapnotes/Detail?q=<id>   -> Response.SAPNote (incl. LongText + PDF url)
+ * The legacy Coveo search path is kept only as a fallback for setups without an authenticator.
  */
 export class SapNotesApiClient {
   private config: ServerConfig;
+  private authenticator?: SapWebAuthenticator;
   private baseUrl = 'https://launchpad.support.sap.com';
   private rawNotesUrl = 'https://me.sap.com/backend/raw/sapnotes';
   private coveoSearchUrl = 'https://sapamericaproductiontyfzmfz0.org.coveo.com/rest/search/v2';
@@ -102,8 +118,136 @@ export class SapNotesApiClient {
   private coveoTokenCache: { token: string; expiresAt: number } | null = null;
   private readonly COVEO_TOKEN_TTL = 14 * 60 * 1000; // Cache for 14 minutes (conservative)
 
-  constructor(config: ServerConfig) {
+  constructor(config: ServerConfig, authenticator?: SapWebAuthenticator) {
     this.config = config;
+    this.authenticator = authenticator;
+  }
+
+  /**
+   * Fetch a SAP for Me backend path as JSON from inside the live authenticated browser page.
+   * Returns null when no authenticator is wired up (callers then use their legacy path).
+   */
+  private async fetchBackendJson<T = any>(path: string): Promise<T | null> {
+    if (!this.authenticator) return null;
+    return this.authenticator.runInSession(async page => {
+      if (!page.url().includes('me.sap.com')) {
+        await page.goto('https://me.sap.com/home', { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.waitForTimeout(2000);
+      }
+      const result = await page.evaluate(async (url: string) => {
+        const response = await fetch(url, {
+          headers: { Accept: 'application/json' },
+          credentials: 'include'
+        });
+        return { status: response.status, body: await response.text() };
+      }, path);
+
+      if (result.status === 401 || result.status === 403) {
+        throw new Error(`SESSION_EXPIRED: backend returned ${result.status} for ${path}`);
+      }
+      if (result.status !== 200) {
+        throw new Error(`Backend request failed (${result.status}) for ${path}`);
+      }
+      try {
+        return JSON.parse(result.body) as T;
+      } catch {
+        // A JS/login stub instead of JSON means the page is not authenticated any more.
+        throw new Error(`SESSION_EXPIRED: backend returned non-JSON for ${path}`);
+      }
+    });
+  }
+
+  /** Convert an OData v2 date literal (`/Date(1755008055000)/`) to `YYYY-MM-DD`. */
+  private parseODataDate(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const match = value.match(/\/Date\((-?\d+)/);
+    if (!match) return null;
+    const date = new Date(Number.parseInt(match[1], 10));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString().split('T')[0];
+  }
+
+  /**
+   * Search SAP Notes through the snogwsmynotes OData service (in-page, authenticated).
+   * Full-text matching uses the FilterKeywordsFuzzy property; plain OData `search=` returns nothing.
+   */
+  private async searchViaBackend(query: string, maxResults: number): Promise<SapNoteSearchResponse | null> {
+    const filter = `FilterKeywordsFuzzy eq '${query.replace(/'/g, "''")}'`;
+    const url =
+      `${NOTES_SEARCH_PATH}?$top=${maxResults}&$inlinecount=allpages` +
+      `&$orderby=${encodeURIComponent('Relevance desc')}&$filter=${encodeURIComponent(filter)}`;
+
+    const json = await this.fetchBackendJson<any>(url);
+    if (!json) return null;
+
+    const rows: any[] = json?.d?.results ?? [];
+    const results: SapNoteResult[] = rows.map(row => {
+      const id = String(row.Number ?? '').replace(/^0+/, '') || String(row.Number ?? '');
+      // The OData URL field is a site-relative path (e.g. /notes/0002137318); make it absolute
+      // so it satisfies the tool output schema.
+      const rawUrl = typeof row.URL === 'string' ? row.URL.trim() : '';
+      const url = /^https?:\/\//i.test(rawUrl)
+        ? rawUrl
+        : rawUrl
+          ? `https://me.sap.com${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`
+          : `https://me.sap.com/notes/${id}`;
+      return {
+        id,
+        title: row.Title || `SAP Note ${row.Number}`,
+        summary: row.ComponentName || row.Category || 'SAP Note',
+        component: row.Component || undefined,
+        releaseDate: this.parseODataDate(row.ReleasedOn) || row.ReleasedOn || 'Unknown',
+        language: 'EN',
+        url
+      };
+    });
+
+    const total = Number.parseInt(json?.d?.__count ?? '', 10);
+    logger.info(`✅ Found ${results.length} SAP Note(s) via SAP for Me backend search`);
+    return { results, totalResults: Number.isNaN(total) ? results.length : total, query };
+  }
+
+  /**
+   * Fetch a note's full content + metadata from /backend/raw/sapnotes/Detail (in-page, authenticated).
+   */
+  private async getNoteViaBackend(noteId: string): Promise<SapNoteDetail | null> {
+    const json = await this.fetchBackendJson<any>(`${NOTES_DETAIL_PATH}?q=${encodeURIComponent(noteId)}`);
+    if (!json) return null;
+
+    const sapNote = json?.Response?.SAPNote;
+    if (!sapNote) {
+      logger.warn(`Detail response for note ${noteId} contained no SAPNote payload`);
+      return null;
+    }
+
+    const header = sapNote.Header || {};
+    const detail: SapNoteDetail = {
+      id: header.Number?.value || noteId,
+      title: sapNote.Title?.value || `SAP Note ${noteId}`,
+      summary: header.Type?.value || 'SAP Note',
+      content: sapNote.LongText?.value || 'No content available',
+      language: header.Language?.value || 'EN',
+      releaseDate: header.ReleasedOn?.value || 'Unknown',
+      component: header.SAPComponentKey?.value,
+      componentText: header.SAPComponentKeyText?.value,
+      priority: header.Priority?.value,
+      category: header.Category?.value,
+      version: header.Version?.value != null ? String(header.Version.value) : undefined,
+      status: header.Status?.value,
+      url: `https://me.sap.com/notes/${header.Number?.value || noteId}`
+    };
+
+    // "PDF Version" action carries a ready-to-use, token-bearing PDF URL.
+    const printUrl = sapNote.Actions?.Print?.url;
+    if (printUrl) detail.pdfUrl = printUrl;
+
+    try {
+      this.extractEnrichedMetadata(sapNote, detail);
+    } catch (error) {
+      logger.warn(`⚠️ Enriched metadata extraction failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    logger.info(`✅ Retrieved SAP Note ${noteId} via SAP for Me backend (${detail.content.length} chars)`);
+    return detail;
   }
 
   /**
@@ -113,8 +257,17 @@ export class SapNotesApiClient {
     logger.info(`🔍 Searching SAP Notes for: "${query}"`);
     logger.debug(`📊 Search parameters: query="${query}", maxResults=${maxResults}`);
 
+    // Primary: the SAP for Me backend OData search, run inside the authenticated browser page.
     try {
-      // Try primary Coveo search approach
+      const backendResults = await this.searchViaBackend(query, maxResults);
+      if (backendResults) return backendResults;
+    } catch (backendError) {
+      const message = backendError instanceof Error ? backendError.message : String(backendError);
+      logger.warn(`⚠️ SAP for Me backend search failed, falling back: ${message}`);
+    }
+
+    try {
+      // Legacy Coveo search approach (fallback)
       try {
         logger.debug('🔍 Attempting primary Coveo search...');
         
@@ -272,8 +425,17 @@ export class SapNotesApiClient {
   async getNote(noteId: string, token: string): Promise<SapNoteDetail | null> {
     logger.info(`📄 Fetching SAP Note: ${noteId}`);
 
+    // Primary: /backend/raw/sapnotes/Detail fetched inside the authenticated browser page.
     try {
-      // Try Playwright-based raw notes API first (most likely to get actual content)
+      const backendNote = await this.getNoteViaBackend(noteId);
+      if (backendNote) return backendNote;
+    } catch (backendError) {
+      const message = backendError instanceof Error ? backendError.message : String(backendError);
+      logger.warn(`⚠️ SAP for Me backend Detail failed, falling back: ${message}`);
+    }
+
+    try {
+      // Legacy Playwright page-navigation approach (fallback)
       try {
         logger.info(`🎭 Trying Playwright approach for note ${noteId}`);
         const note = await this.getNoteWithPlaywright(noteId, token);

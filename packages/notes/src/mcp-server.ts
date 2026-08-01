@@ -62,7 +62,7 @@ class SapNoteMcpServer {
   constructor() {
     this.config = this.loadConfig();
     this.authenticator = createNotesAuthenticator(this.config);
-    this.sapNotesClient = new SapNotesApiClient(this.config);
+    this.sapNotesClient = new SapNotesApiClient(this.config, this.authenticator);
     
     // Create MCP server with official SDK
     this.mcpServer = new McpServer({
@@ -304,6 +304,7 @@ class SapNoteMcpServer {
           if (noteDetail.manualActions) output.manualActions = noteDetail.manualActions;
           if (noteDetail.attachments?.length) output.attachments = noteDetail.attachments;
           if (noteDetail.downloadUrl) output.downloadUrl = noteDetail.downloadUrl;
+          if (noteDetail.pdfUrl) output.pdfUrl = noteDetail.pdfUrl;
 
           // Format display text
           let resultText = `**SAP Note ${output.id} - ${output.title}**\n\n`;

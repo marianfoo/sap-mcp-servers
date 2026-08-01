@@ -36,6 +36,12 @@ export class SapWebAuthenticator {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private skipSharedSsoOnce = false;
+  // Live, kept-alive authenticated session for runInSession() (SAP for Me backend
+  // endpoints only serve JSON to a real logged-in browser, not to plain HTTP clients).
+  private liveBrowser: Browser | null = null;
+  private liveContext: BrowserContext | null = null;
+  private livePage: Page | null = null;
+  private liveExpiresAt = 0;
   private readonly log: Logger;
 
   constructor(private readonly config: AuthConfig, private readonly profile: ServiceProfile) {
@@ -78,6 +84,7 @@ export class SapWebAuthenticator {
   async destroy(): Promise<void> {
     this.authState = {};
     await this.cleanup();
+    await this.closeLiveBrowser();
   }
 
   private async performAuth(): Promise<AuthSession> {
@@ -224,61 +231,13 @@ export class SapWebAuthenticator {
       this.skipSharedSsoOnce = false;
     }
 
-    const authMethod = this.resolveAuthMethod();
-    const headless = !this.config.headful;
-    const startTime = Date.now();
-    this.log.warn(`Starting ${this.profile.serviceName} authentication (method: ${authMethod}, headless: ${headless})`);
-
     try {
-      this.browser = await this.launchBrowser(headless);
+      const result = await this.launchAndLogin();
+      this.browser = result.browser;
+      this.context = result.context;
+      this.page = result.page;
 
-      const contextOptions: BrowserContextOptions = {
-        ignoreHTTPSErrors: true,
-        locale: 'en-US',
-        viewport: { width: 1440, height: 900 }
-      };
-      if (this.profile.userAgent) {
-        contextOptions.userAgent = this.profile.userAgent;
-      }
-      if (this.config.ssoStorageStateFile && existsSync(this.config.ssoStorageStateFile)) {
-        contextOptions.storageState = this.config.ssoStorageStateFile;
-        this.log.warn(`Loading shared SAP SSO browser state from ${this.config.ssoStorageStateFile}`);
-      }
-      if (authMethod === 'certificate') {
-        contextOptions.clientCertificates = [this.prepareClientCertificate()];
-      }
-
-      this.context = await this.browser.newContext(contextOptions);
-      this.page = await this.context.newPage();
-      this.page.on('dialog', dialog => {
-        this.log.warn(`Dialog appeared: ${dialog.type()} ${dialog.message()}`);
-        dialog.dismiss().catch(() => {});
-      });
-
-      if (authMethod === 'password') {
-        await performPasswordLogin(this.page, this.config, this.profile, this.log);
-      } else if (authMethod === 'certificate') {
-        await performCertificateNavigation(this.page, this.config, this.profile, this.log);
-      } else {
-        await performInteractiveLogin(this.page, this.config, this.profile, this.log);
-      }
-
-      await this.page.waitForTimeout(1500);
-
-      const allCookies = await this.context.cookies();
-      if (allCookies.length === 0) {
-        throw new AuthenticationError('Authentication appeared to succeed but no cookies were set');
-      }
-
-      const scoped = await selectCookies(this.context, this.profile.cookieScope);
-      const cookieHeader = serializeCookies(scoped);
-      if (!cookieHeader) {
-        throw new AuthenticationError(
-          `${this.profile.serviceName} login completed but no cookies were captured for the configured scope`
-        );
-      }
-
-      if (this.profile.validateSession && !(await this.profile.validateSession(cookieHeader))) {
+      if (this.profile.validateSession && !(await this.profile.validateSession(result.cookieHeader))) {
         throw new AuthenticationError(
           `${this.profile.serviceName} login produced cookies, but the service still rejected the session. ` +
           'Headless username/password login likely requires MFA or another interactive step. ' +
@@ -286,13 +245,19 @@ export class SapWebAuthenticator {
         );
       }
 
-      const expiresAt = Date.now() + this.config.maxSessionAgeH * 60 * 60 * 1000;
-      this.authState = { token: cookieHeader, cookies: scoped, expiresAt, authMethod };
+      this.authState = {
+        token: result.cookieHeader,
+        cookies: result.scoped,
+        expiresAt: result.expiresAt,
+        authMethod: result.authMethod
+      };
 
-      saveCachedToken(this.config.tokenCacheFile, { access_token: cookieHeader, cookies: scoped, expiresAt, authMethod }, this.log);
-      await saveSharedSsoStorageState(this.context, this.config.ssoStorageStateFile, this.log);
-
-      this.log.warn(`${this.profile.serviceName} authentication completed in ${Date.now() - startTime}ms (method: ${authMethod})`);
+      saveCachedToken(
+        this.config.tokenCacheFile,
+        { access_token: result.cookieHeader, cookies: result.scoped, expiresAt: result.expiresAt, authMethod: result.authMethod },
+        this.log
+      );
+      await saveSharedSsoStorageState(result.context, this.config.ssoStorageStateFile, this.log);
     } catch (error) {
       this.authState = {};
       const message = error instanceof Error ? error.message : String(error);
@@ -300,6 +265,133 @@ export class SapWebAuthenticator {
       throw error;
     } finally {
       await this.cleanup();
+    }
+  }
+
+  /**
+   * Launch a browser, open a context (reusing SSO storage state when present), perform the
+   * resolved login flow, and return the live handles plus the captured session cookies.
+   * Shared by performAuth() (which captures cookies then closes the browser) and
+   * ensureLivePage() (which keeps the browser alive for runInSession()).
+   */
+  private async launchAndLogin(): Promise<{
+    browser: Browser;
+    context: BrowserContext;
+    page: Page;
+    cookieHeader: string;
+    scoped: Cookie[];
+    authMethod: ResolvedAuthMethod;
+    expiresAt: number;
+  }> {
+    const authMethod = this.resolveAuthMethod();
+    const headless = !this.config.headful;
+    const startTime = Date.now();
+    this.log.warn(`Starting ${this.profile.serviceName} authentication (method: ${authMethod}, headless: ${headless})`);
+
+    const browser = await this.launchBrowser(headless);
+
+    const contextOptions: BrowserContextOptions = {
+      ignoreHTTPSErrors: true,
+      locale: 'en-US',
+      viewport: { width: 1440, height: 900 }
+    };
+    if (this.profile.userAgent) {
+      contextOptions.userAgent = this.profile.userAgent;
+    }
+    if (this.config.ssoStorageStateFile && existsSync(this.config.ssoStorageStateFile)) {
+      contextOptions.storageState = this.config.ssoStorageStateFile;
+      this.log.warn(`Loading shared SAP SSO browser state from ${this.config.ssoStorageStateFile}`);
+    }
+    if (authMethod === 'certificate') {
+      contextOptions.clientCertificates = [this.prepareClientCertificate()];
+    }
+
+    const context = await browser.newContext(contextOptions);
+    const page = await context.newPage();
+    page.on('dialog', dialog => {
+      this.log.warn(`Dialog appeared: ${dialog.type()} ${dialog.message()}`);
+      dialog.dismiss().catch(() => {});
+    });
+
+    if (authMethod === 'password') {
+      await performPasswordLogin(page, this.config, this.profile, this.log);
+    } else if (authMethod === 'certificate') {
+      await performCertificateNavigation(page, this.config, this.profile, this.log);
+    } else {
+      await performInteractiveLogin(page, this.config, this.profile, this.log);
+    }
+
+    await page.waitForTimeout(1500);
+
+    const allCookies = await context.cookies();
+    if (allCookies.length === 0) {
+      throw new AuthenticationError('Authentication appeared to succeed but no cookies were set');
+    }
+
+    const scoped = await selectCookies(context, this.profile.cookieScope);
+    const cookieHeader = serializeCookies(scoped);
+    if (!cookieHeader) {
+      throw new AuthenticationError(
+        `${this.profile.serviceName} login completed but no cookies were captured for the configured scope`
+      );
+    }
+
+    const expiresAt = Date.now() + this.config.maxSessionAgeH * 60 * 60 * 1000;
+    this.log.warn(`${this.profile.serviceName} authentication completed in ${Date.now() - startTime}ms (method: ${authMethod})`);
+    return { browser, context, page, cookieHeader, scoped, authMethod, expiresAt };
+  }
+
+  /**
+   * Run a callback inside a live, authenticated browser page, kept alive across calls.
+   * SAP for Me backend endpoints (/backend/raw/...) return a JS-bootstrap HTML stub to plain
+   * HTTP clients and only serve JSON to a real logged-in browser, so consumers that need those
+   * endpoints must run their fetches in-page via this method rather than with the cookie header.
+   */
+  async runInSession<T>(fn: (page: Page) => Promise<T>): Promise<T> {
+    const page = await this.ensureLivePage();
+    return fn(page);
+  }
+
+  /** Force the next runInSession() call to perform a fresh login. */
+  invalidateLiveSession(): void {
+    this.liveExpiresAt = 0;
+  }
+
+  private async ensureLivePage(): Promise<Page> {
+    if (this.livePage && !this.livePage.isClosed() && Date.now() < this.liveExpiresAt - EXPIRY_BUFFER_MS) {
+      return this.livePage;
+    }
+    await this.closeLiveBrowser();
+
+    const result = await this.launchAndLogin();
+    this.liveBrowser = result.browser;
+    this.liveContext = result.context;
+    this.livePage = result.page;
+    this.liveExpiresAt = result.expiresAt;
+
+    // Keep the memory + disk session in sync so ensureSession() consumers benefit too.
+    this.authState = {
+      token: result.cookieHeader,
+      cookies: result.scoped,
+      expiresAt: result.expiresAt,
+      authMethod: result.authMethod
+    };
+    saveCachedToken(
+      this.config.tokenCacheFile,
+      { access_token: result.cookieHeader, cookies: result.scoped, expiresAt: result.expiresAt, authMethod: result.authMethod },
+      this.log
+    );
+    await saveSharedSsoStorageState(result.context, this.config.ssoStorageStateFile, this.log);
+
+    return this.livePage;
+  }
+
+  private async closeLiveBrowser(): Promise<void> {
+    if (this.liveBrowser) {
+      await this.liveBrowser.close().catch(error => this.log.warn('Failed to close live browser', error));
+      this.liveBrowser = null;
+      this.liveContext = null;
+      this.livePage = null;
     }
   }
 
