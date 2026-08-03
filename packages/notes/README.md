@@ -62,8 +62,10 @@ The simplest approach — no certificate management required.
 
 ```env
 SAP_USERNAME=your.email@company.com
-SAP_PASSWORD=your_sap_password
+SAP_PASSWORD="your_sap_password"
 ```
+
+When using a `.env` file, quote any value containing `#`; dotenv otherwise treats `#` and everything after it as a comment. For example, use `SAP_PASSWORD="My#Pass"`. The same applies to `PFX_PASSPHRASE`.
 
 Or pass credentials directly in your MCP client config (no `.env` file needed):
 
@@ -95,7 +97,7 @@ Uses a `.pfx` client certificate for TLS-level authentication.
 3. Configure:
    ```env
    PFX_PATH=./certs/sap.pfx
-   PFX_PASSPHRASE=your_certificate_passphrase
+   PFX_PASSPHRASE="your_certificate_passphrase"
    ```
 
 ### Auto Mode (Default)
