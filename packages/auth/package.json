@@ -58,7 +58,7 @@
     "playwright": ">=1.40 <2"
   },
   "devDependencies": {
-    "@types/node": "^25.9.2",
+    "@types/node": "^26.1.2",
     "playwright": "^1.62.1",
     "rimraf": "^6.0.0",
     "typescript": "^7.0.2",
