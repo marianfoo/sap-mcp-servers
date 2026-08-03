@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@marianfoo/sap-mcp-auth": "^0.1.0",
-    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
