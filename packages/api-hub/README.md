@@ -47,15 +47,17 @@ Fill the scaffolded `.env`:
 ```env
 AUTH_METHOD=auto
 SAP_USERNAME=your.email@company.com
-SAP_PASSWORD=your_sap_password
+SAP_PASSWORD="your_sap_password"
 HEADFUL=false
 ```
+
+When using a `.env` file, quote any value containing `#`; dotenv otherwise treats `#` and everything after it as a comment. For example, use `SAP_PASSWORD="My#Pass"`. The same applies to `PFX_PASSPHRASE`.
 
 Optional SAP Passport/PFX fallback:
 
 ```env
 PFX_PATH=/absolute/path/to/sap-passport.pfx
-PFX_PASSPHRASE=your-passphrase
+PFX_PASSPHRASE="your-passphrase"
 ```
 
 `AUTH_METHOD=auto` chooses auth in this order:
