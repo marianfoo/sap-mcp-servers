@@ -24,6 +24,9 @@ jobs:
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       paths_released: ${{ steps.release.outputs.paths_released }}
+      notes_release_created: ${{ steps.release.outputs['packages/notes--release_created'] }}
+      notes_tag_name: ${{ steps.release.outputs['packages/notes--tag_name'] }}
+      notes_version: ${{ steps.release.outputs['packages/notes--version'] }}
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v4
         id: release
@@ -68,3 +71,37 @@ jobs:
             npm publish --workspace "$path" --provenance --access public
             echo "::endgroup::"
           done
+
+  # SAP Notes is distributed as a tiny reference bundle: the MCPB contains only
+  # its manifest and icon, while npx installs the released server package.
+  build-notes-mcpb:
+    needs: [release-please, publish-npm]
+    if: ${{ needs.release-please.outputs.notes_release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Validate and pack SAP Notes MCPB
+        env:
+          MCPB: '@anthropic-ai/mcpb@2.1.2'
+          VERSION: ${{ needs.release-please.outputs.notes_version }}
+        run: |
+          set -euo pipefail
+          test "$(jq -r .version packages/notes/mcpb-bundle/manifest.json)" = "$VERSION"
+          npx --yes "$MCPB" validate packages/notes/mcpb-bundle/manifest.json
+          npx --yes "$MCPB" pack packages/notes/mcpb-bundle "sap-notes-${VERSION}.mcpb"
+          unzip -p "sap-notes-${VERSION}.mcpb" manifest.json | jq .
+
+      - name: Attach MCPB to SAP Notes release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.release-please.outputs.notes_tag_name }}
+          VERSION: ${{ needs.release-please.outputs.notes_version }}
+        run: gh release upload "$TAG_NAME" "sap-notes-${VERSION}.mcpb" --clobber
