@@ -1,7 +1,8 @@
+#!/usr/bin/env node
 import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join, isAbsolute, resolve } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, realpathSync } from 'fs';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -43,10 +44,10 @@ function resolveOptionalPath(value: string | undefined): string | undefined {
 // Load environment variables from an explicit file, the launch CWD, then the project root.
 const configuredEnvFile = process.env.ENV_FILE;
 if (configuredEnvFile) {
-  config({ path: resolveOptionalPath(configuredEnvFile) });
+  config({ path: resolveOptionalPath(configuredEnvFile), quiet: true });
 } else {
-  config();
-  config({ path: join(__dirname, '..', '.env') });
+  config({ quiet: true });
+  config({ path: join(__dirname, '..', '.env'), quiet: true });
 }
 
 /**
@@ -395,19 +396,19 @@ class SapNoteMcpServer {
   }
 }
 
-// Start server if this file is run directly (ESM-safe, cross-platform)
-// process.argv[1] may be a relative path, so resolve it to absolute before comparing
-const isDirectRun = (() => {
+// Start server if this file is run directly (ESM-safe, cross-platform).
+// npm invokes package bins through a symlink, so compare canonical paths.
+function isDirectRun(): boolean {
   try {
-    const thisFile = fileURLToPath(import.meta.url);
-    const invoked = process.argv[1] ? resolve(process.argv[1]) : '';
+    const thisFile = realpathSync(fileURLToPath(import.meta.url));
+    const invoked = process.argv[1] ? realpathSync(resolve(process.argv[1])) : '';
     return thisFile === invoked;
   } catch {
     return false;
   }
-})();
+}
 
-if (isDirectRun) {
+if (isDirectRun()) {
   const server = new SapNoteMcpServer();
   
   // Handle process termination gracefully
@@ -421,8 +422,5 @@ if (isDirectRun) {
 }
 
 export { SapNoteMcpServer };
-
-
-
 
 

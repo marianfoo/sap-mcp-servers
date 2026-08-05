@@ -36,7 +36,14 @@
     "packages/notes": {
       "release-type": "node",
       "component": "sap-note-search-mcp",
-      "package-name": "sap-note-search-mcp"
+      "package-name": "sap-note-search-mcp",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "mcpb-bundle/manifest.json",
+          "jsonpath": "$.version"
+        }
+      ]
     }
   }
 }

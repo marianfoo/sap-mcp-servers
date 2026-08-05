@@ -40,6 +40,9 @@ jobs:
       - name: Smoke test published MCP bins
         run: npm run smoke:bin
 
+      - name: Validate SAP Notes MCPB manifest
+        run: npx --yes @anthropic-ai/mcpb@2.1.2 validate packages/notes/mcpb-bundle/manifest.json
+
       - name: Type check
         run: npm run typecheck
 

@@ -28,7 +28,7 @@
     "build:auth": "npm run build -w @marianfoo/sap-mcp-auth",
     "clean": "npm run clean --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "smoke:bin": "node scripts/smoke-mcp-bin.mjs packages/api-hub sap-api-hub-mcp sap-api-hub-mcp && node scripts/smoke-mcp-bin.mjs packages/roadmap sap-roadmap-mcp sap-roadmap-mcp",
+    "smoke:bin": "node scripts/smoke-mcp-bin.mjs packages/api-hub sap-api-hub-mcp sap-api-hub-mcp && node scripts/smoke-mcp-bin.mjs packages/roadmap sap-roadmap-mcp sap-roadmap-mcp && node scripts/smoke-mcp-bin.mjs packages/notes sap-note-search-mcp sap-note-search-mcp",
     "test": "npm run test --workspaces --if-present",
     "install:browsers": "playwright install chromium",
     "commitlint": "commitlint --edit",

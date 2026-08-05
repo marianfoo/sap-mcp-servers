@@ -45,10 +45,10 @@ function resolveOptionalPath(value: string | undefined): string | undefined {
 // Load environment variables from an explicit file, the launch CWD, then the project root.
 const configuredEnvFile = process.env.ENV_FILE;
 if (configuredEnvFile) {
-  config({ path: resolveOptionalPath(configuredEnvFile) });
+  config({ path: resolveOptionalPath(configuredEnvFile), quiet: true });
 } else {
-  config();
-  config({ path: join(__dirname, '..', '.env') });
+  config({ quiet: true });
+  config({ path: join(__dirname, '..', '.env'), quiet: true });
 }
 
 /**

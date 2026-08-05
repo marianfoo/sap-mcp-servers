@@ -5,8 +5,10 @@
 > **MCP server for searching and retrieving SAP Notes / KB articles with full metadata extraction**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.12.0-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue.svg)](https://www.typescriptlang.org/)
+
+[![Add to Werkbank][werkbank-badge]][werkbank-install]
 
 > [!CAUTION]
 > **This MCP Server uses private APIs from SAP behind authentication. Please check whether the use violates SAP's ToS. The author assumes no liability for this. Because of this i do not guarantee that the server will always work.**
@@ -33,13 +35,32 @@ This [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server giv
 
 ### Prerequisites
 
-- **Node.js 18+** — [Download here](https://nodejs.org/)
+- **Node.js 22.12+** — [Download here](https://nodejs.org/)
 - **SAP S-User** — with access to SAP Support Portal / me.sap.com
 - **An MCP client** — [Cursor](https://cursor.sh/), [Claude Desktop](https://claude.ai/download), VS Code with Copilot, etc.
 
 ### Installation
 
-This package lives in the [`sap-mcp-servers`](../../README.md) monorepo — clone and build from the repo root:
+For a one-click Claude Desktop installation, download `sap-notes.mcpb` from the matching
+[SAP Notes GitHub release](https://github.com/marianfoo/sap-mcp-servers/releases) and open it.
+
+The **Add to Werkbank** button uses the same MCPB. Werkbank downloads the bundle, reads its manifest,
+and shows the command and configuration form before installing it.
+
+For other MCP clients, run the npm package directly with `npx`:
+
+```json
+{
+  "mcpServers": {
+    "sap-notes": {
+      "command": "npx",
+      "args": ["-y", "sap-note-search-mcp"]
+    }
+  }
+}
+```
+
+To develop from source, clone the [`sap-mcp-servers`](../../README.md) monorepo and build from its root:
 
 ```bash
 git clone https://github.com/marianfoo/sap-mcp-servers.git
@@ -73,8 +94,8 @@ Or pass credentials directly in your MCP client config (no `.env` file needed):
 {
   "mcpServers": {
     "sap-notes": {
-      "command": "node",
-      "args": ["/path/to/mcp-sap-notes/dist/mcp-server.js"],
+      "command": "npx",
+      "args": ["-y", "sap-note-search-mcp"],
       "env": {
         "SAP_USERNAME": "your.email@company.com",
         "SAP_PASSWORD": "your_sap_password"
@@ -138,8 +159,8 @@ Add to your MCP settings (`settings.json` or `claude_desktop_config.json`):
 {
   "mcpServers": {
     "sap-notes": {
-      "command": "node",
-      "args": ["/full/path/to/mcp-sap-notes/dist/mcp-server.js"],
+      "command": "npx",
+      "args": ["-y", "sap-note-search-mcp"],
       "env": {
         "SAP_USERNAME": "your.email@company.com",
         "SAP_PASSWORD": "your_sap_password"
@@ -154,14 +175,17 @@ Add to your MCP settings (`settings.json` or `claude_desktop_config.json`):
 {
   "mcpServers": {
     "sap-notes": {
-      "command": "node",
-      "args": ["/full/path/to/mcp-sap-notes/dist/mcp-server.js"]
+      "command": "npx",
+      "args": ["-y", "sap-note-search-mcp"],
+      "env": {
+        "ENV_FILE": "/full/path/to/.env"
+      }
     }
   }
 }
 ```
 
-> **Note:** Replace the path with your actual absolute path. On Windows use `C:\\Users\\you\\...`, on macOS/Linux use `/Users/you/...`.
+> **Note:** When using `ENV_FILE`, replace the path with the absolute path to your `.env` file.
 
 After adding the config, restart your MCP client. The tools will appear in the AI assistant.
 
@@ -346,3 +370,6 @@ See [docs/authentication.md](docs/authentication.md) for detailed troubleshootin
 ## License
 
 [Apache 2.0](LICENSE)
+
+[werkbank-badge]: assets/add-to-werkbank.svg
+[werkbank-install]: https://getwerkbank.com/install-mcpb?url=https%3A%2F%2Fgithub.com%2Fmarianfoo%2Fsap-mcp-servers%2Freleases%2Fdownload%2Fsap-notes-latest%2Fsap-notes.mcpb
