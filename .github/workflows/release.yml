@@ -98,10 +98,23 @@ jobs:
           npx --yes "$MCPB" validate packages/notes/mcpb-bundle/manifest.json
           npx --yes "$MCPB" pack packages/notes/mcpb-bundle "sap-notes-${VERSION}.mcpb"
           unzip -p "sap-notes-${VERSION}.mcpb" manifest.json | jq .
+          cp "sap-notes-${VERSION}.mcpb" sap-notes.mcpb
 
       - name: Attach MCPB to SAP Notes release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ needs.release-please.outputs.notes_tag_name }}
           VERSION: ${{ needs.release-please.outputs.notes_version }}
-        run: gh release upload "$TAG_NAME" "sap-notes-${VERSION}.mcpb" --clobber
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG_NAME" "sap-notes-${VERSION}.mcpb" sap-notes.mcpb --clobber
+
+          if ! gh release view sap-notes-latest >/dev/null 2>&1; then
+            gh release create sap-notes-latest \
+              --target "$GITHUB_SHA" \
+              --title "SAP Notes MCPB (latest)" \
+              --notes "Stable download target for the latest SAP Notes MCPB bundle." \
+              --prerelease \
+              --latest=false
+          fi
+          gh release upload sap-notes-latest sap-notes.mcpb --clobber
