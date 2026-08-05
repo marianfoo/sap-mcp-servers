@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.4...sap-note-search-mcp-v0.3.5) (2026-08-05)
+
+
+### Bug Fixes
+
+* **notes:** add installable MCPB distribution ([#40](https://github.com/marianfoo/sap-mcp-servers/issues/40)) ([2368546](https://github.com/marianfoo/sap-mcp-servers/commit/23685469887c83d27ce9e958e3f5b46219072237))
+
 ## [0.3.4](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.3...sap-note-search-mcp-v0.3.4) (2026-08-01)
 
 
