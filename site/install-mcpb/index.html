@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f9f8fc" />
+    <meta name="robots" content="noindex" />
+    <meta
+      name="description"
+      content="Review and open a trusted MCP bundle in Werkbank."
+    />
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/site.css" />
+    <title>Add a connector to Werkbank</title>
+  </head>
+  <body class="install-page" data-page="install">
+    <header class="site-header shell">
+      <a class="brand" href="../" aria-label="Werkbank home">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>Werkbank</span>
+      </a>
+      <a class="quiet-link" href="https://github.com/marianfoo/sap-mcp-servers">GitHub</a>
+    </header>
+
+    <main class="install-main shell">
+      <section class="install-card" data-install-panel>
+        <div class="install-symbol" aria-hidden="true"><span></span></div>
+        <p class="eyebrow">Connector handoff</p>
+        <h1>Add Knowledge@SAP to Werkbank</h1>
+        <p class="install-lede">
+          Werkbank will download the MCP bundle and show its command and configuration fields.
+          Nothing is installed until you approve it inside the desktop app.
+        </p>
+
+        <ol class="install-steps">
+          <li class="is-current"><span>1</span><div><b>Open Werkbank</b><small>This page requests the local app.</small></div></li>
+          <li><span>2</span><div><b>Review the connector</b><small>Check its source, command, and requested settings.</small></div></li>
+          <li><span>3</span><div><b>Confirm the install</b><small>Werkbank adds it only after your approval.</small></div></li>
+        </ol>
+
+        <a class="button button-primary button-install" data-open-werkbank href="#">
+          <span class="button-mark" aria-hidden="true"></span>
+          Open in Werkbank
+        </a>
+        <p class="install-status" data-install-status aria-live="polite">Preparing the secure handoff…</p>
+
+        <div class="bundle-source">
+          <div><span class="status-dot"></span><p><small>Bundle source</small><b data-bundle-host>Checking…</b></p></div>
+          <span class="verified">HTTPS</span>
+        </div>
+
+        <details class="fallbacks">
+          <summary>Werkbank did not open?</summary>
+          <p>Make sure Werkbank is installed, then try the button again.</p>
+          <div>
+            <a data-download-bundle href="#">Download the MCPB</a>
+            <button type="button" data-copy-link><span data-copy-label>Copy app link</span></button>
+          </div>
+        </details>
+      </section>
+
+      <section class="install-card invalid-card" data-invalid-panel hidden>
+        <div class="invalid-symbol" aria-hidden="true">!</div>
+        <p class="eyebrow">Invalid install link</p>
+        <h1>This connector URL cannot be opened.</h1>
+        <p class="install-lede">The bundle must use a valid HTTPS address without embedded credentials.</p>
+        <a class="button button-secondary" href="../">Return to Werkbank</a>
+      </section>
+
+      <p class="install-footnote">
+        Werkbank never installs from a webpage silently. The final decision always happens in the app.
+      </p>
+    </main>
+
+    <script type="module" src="../assets/install.mjs"></script>
+  </body>
+</html>

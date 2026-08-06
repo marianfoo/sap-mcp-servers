@@ -372,4 +372,4 @@ See [docs/authentication.md](docs/authentication.md) for detailed troubleshootin
 [Apache 2.0](LICENSE)
 
 [werkbank-badge]: assets/add-to-werkbank.svg
-[werkbank-install]: https://getwerkbank.com/install-mcpb?url=https%3A%2F%2Fgithub.com%2Fmarianfoo%2Fsap-mcp-servers%2Freleases%2Fdownload%2Fsap-notes-latest%2Fsap-notes.mcpb
+[werkbank-install]: https://marianfoo.github.io/sap-mcp-servers/install-mcpb/?url=https%3A%2F%2Fgithub.com%2Fmarianfoo%2Fsap-mcp-servers%2Freleases%2Fdownload%2Fsap-notes-latest%2Fsap-notes.mcpb

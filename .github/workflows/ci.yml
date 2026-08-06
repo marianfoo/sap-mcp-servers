@@ -43,6 +43,9 @@ jobs:
       - name: Validate SAP Notes MCPB manifest
         run: npx --yes @anthropic-ai/mcpb@2.1.2 validate packages/notes/mcpb-bundle/manifest.json
 
+      - name: Test GitHub Pages install handoff
+        run: npm run test:pages
+
       - name: Type check
         run: npm run typecheck
 

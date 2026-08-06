@@ -10,7 +10,7 @@
     "type": "git",
     "url": "git+https://github.com/marianfoo/sap-mcp-servers.git"
   },
-  "homepage": "https://github.com/marianfoo/sap-mcp-servers#readme",
+  "homepage": "https://marianfoo.github.io/sap-mcp-servers/",
   "bugs": {
     "url": "https://github.com/marianfoo/sap-mcp-servers/issues"
   },
@@ -30,6 +30,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "smoke:bin": "node scripts/smoke-mcp-bin.mjs packages/api-hub sap-api-hub-mcp sap-api-hub-mcp && node scripts/smoke-mcp-bin.mjs packages/roadmap sap-roadmap-mcp sap-roadmap-mcp && node scripts/smoke-mcp-bin.mjs packages/notes sap-note-search-mcp sap-note-search-mcp",
     "test": "npm run test --workspaces --if-present",
+    "test:pages": "node --test test/pages-install.test.mjs",
     "install:browsers": "playwright install chromium",
     "commitlint": "commitlint --edit",
     "prepare": "husky || true"

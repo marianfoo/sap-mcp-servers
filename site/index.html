@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f9f8fc" />
+    <meta
+      name="description"
+      content="Werkbank is a local AI workbench for conversations, Spaces, built-in work sources, and trusted MCP connectors."
+    />
+    <meta property="og:title" content="Werkbank — local AI work, connected" />
+    <meta
+      property="og:description"
+      content="Bring work and SAP context into one local, connector-powered workspace."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://marianfoo.github.io/sap-mcp-servers/" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./assets/site.css" />
+    <title>Werkbank — local AI work, connected</title>
+  </head>
+  <body data-page="landing">
+    <header class="site-header shell">
+      <a class="brand" href="./" aria-label="Werkbank home">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>Werkbank</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#connectors">Connectors</a>
+        <a href="https://github.com/marianfoo/sap-mcp-servers">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero shell">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> Local AI · trusted connectors · SAP-ready</p>
+          <h1>Work context and SAP knowledge, in one calm workspace.</h1>
+          <p class="lede">
+            Werkbank brings conversations, reusable Spaces, built-in work sources, and MCP
+            connectors into a focused desktop experience that stays under your control.
+          </p>
+          <div class="actions">
+            <a class="button button-primary" data-default-install-link href="#">
+              <span class="button-mark" aria-hidden="true"></span>
+              Add Knowledge@SAP
+            </a>
+            <a class="button button-secondary" href="https://github.com/marianfoo/sap-mcp-servers/tree/main/packages/notes">
+              View connector source
+            </a>
+          </div>
+          <p class="microcopy">One click opens Werkbank. You review every connector before it is added.</p>
+        </div>
+
+        <div class="product-shot" aria-label="Werkbank interface preview">
+          <div class="window-bar">
+            <span></span><span></span><span></span>
+            <small>New Conversation</small>
+          </div>
+          <div class="product-body">
+            <div class="mini-rail">
+              <span class="mini-brand"></span>
+              <i class="active"></i><i></i><i></i>
+            </div>
+            <div class="mini-list">
+              <strong>Conversations</strong>
+              <span class="mini-search"></span>
+              <p>Active Conversations</p>
+              <div>New Conversation <b>···</b></div>
+              <p>Spaces</p>
+              <div>Transport Backlog</div>
+            </div>
+            <div class="mini-main">
+              <span class="hero-diamond"></span>
+              <h2>How can I help<br />to get things done?</h2>
+              <div class="composer-preview">
+                <span>Message Joule…</span>
+                <div>
+                  <b>＋</b><b>✦</b><small>▱ Default</small><small>▱ Knowledge@SAP</small>
+                </div>
+              </div>
+              <div class="source-menu">
+                <div><i class="model-icon"></i><span>Model</span><b>›</b></div>
+                <div><i>◎</i><span>Web Search</span><b>✓</b></div>
+                <div><i>▱</i><span>Work Email</span><b>✓</b></div>
+                <div><i>▥</i><span>Charts</span><b>✓</b></div>
+                <div><i>▦</i><span>Work Calendar</span><b>✓</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="trust-strip" aria-label="Product principles">
+        <div class="shell trust-grid">
+          <span><b>Local first</b> Your workspace stays yours.</span>
+          <span><b>Explicit installs</b> Review before anything runs.</span>
+          <span><b>Open connectors</b> Inspect the MCP source on GitHub.</span>
+        </div>
+      </section>
+
+      <section class="features shell" aria-labelledby="features-title">
+        <div class="section-heading">
+          <p class="eyebrow">A focused work surface</p>
+          <h2 id="features-title">Context without the clutter.</h2>
+        </div>
+        <div class="feature-grid">
+          <article>
+            <span class="feature-icon">✦</span>
+            <h3>Built-in work sources</h3>
+            <p>Bring Work Email and Work Calendar into the same flow as your conversation.</p>
+          </article>
+          <article>
+            <span class="feature-icon">▱</span>
+            <h3>Connect only what you need</h3>
+            <p>Choose a trusted MCP connector for each conversation and keep the boundary visible.</p>
+          </article>
+          <article>
+            <span class="feature-icon">◇</span>
+            <h3>Reusable Spaces</h3>
+            <p>Turn recurring work into durable views, without losing the context behind the result.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="connector-section shell" id="connectors" aria-labelledby="connector-title">
+        <div class="connector-card">
+          <div class="connector-copy">
+            <p class="eyebrow">Featured connector</p>
+            <h2 id="connector-title">Knowledge@SAP</h2>
+            <p>
+              Search and retrieve SAP Notes and Knowledge Base articles from Werkbank through the
+              open-source SAP Notes MCP server.
+            </p>
+            <ul>
+              <li>Search SAP Notes by topic, component, or ID</li>
+              <li>Fetch full note content and metadata</li>
+              <li>Configure SAP authentication inside Werkbank</li>
+            </ul>
+          </div>
+          <div class="connector-action">
+            <span class="large-mark" aria-hidden="true"><span></span></span>
+            <strong>Knowledge@SAP</strong>
+            <small>SAP Notes MCP Server</small>
+            <a class="button button-primary button-wide" data-default-install-link href="#">
+              Add to Werkbank
+            </a>
+            <span class="release-note">Uses the published GitHub release bundle</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer shell">
+      <a class="brand brand-small" href="./"><span class="brand-mark" aria-hidden="true"><span></span></span>Werkbank</a>
+      <p>Local work, connected deliberately.</p>
+      <a href="https://github.com/marianfoo/sap-mcp-servers">Source on GitHub</a>
+    </footer>
+
+    <script type="module" src="./assets/install.mjs"></script>
+  </body>
+</html>
