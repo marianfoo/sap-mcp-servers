@@ -191,6 +191,15 @@ export const NoteGetOutputSchema = {
     .optional()
     .describe('Support Packages that include this fix.'),
 
+  supportPackagePatches: z
+    .array(z.object({
+      softwareComponent: z.string(),
+      name: z.string(),
+      level: z.string().optional(),
+    }))
+    .optional()
+    .describe('Support Package patches that include this fix.'),
+
   references: z
     .object({
       referencesTo: z.array(z.object({
@@ -225,9 +234,9 @@ export const NoteGetOutputSchema = {
 
   correctionsInfo: z
     .object({
-      totalCorrections: z.number().optional(),
-      totalManualActivities: z.number().optional(),
-      totalPrerequisites: z.number().optional(),
+      totalCorrections: z.number().int().nonnegative().optional(),
+      totalManualActivities: z.number().int().nonnegative().optional(),
+      totalPrerequisites: z.number().int().nonnegative().optional(),
     })
     .optional()
     .describe('Summary counts: corrections, manual activities, prerequisites.'),
@@ -236,7 +245,7 @@ export const NoteGetOutputSchema = {
     .array(z.object({
       softwareComponent: z.string(),
       pakId: z.string(),
-      count: z.number().optional(),
+      count: z.number().int().nonnegative().optional(),
     }))
     .optional()
     .describe('Per-software-component correction instruction summary.'),

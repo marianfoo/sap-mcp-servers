@@ -423,4 +423,3 @@ if (isDirectRun()) {
 
 export { SapNoteMcpServer };
 
-

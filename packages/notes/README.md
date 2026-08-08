@@ -6,7 +6,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22.12.0-brightgreen.svg)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue.svg)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg)](https://www.typescriptlang.org/)
 
 [![Add to Werkbank][werkbank-badge]][werkbank-install]
 
@@ -22,7 +22,7 @@ This [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server giv
 ## Features
 
 - **Two MCP tools** — `search` (find notes) and `fetch` (retrieve full content + metadata)
-- **Enriched metadata** — validity ranges, support packages, references, prerequisites, side effects, correction summaries, attachments
+- **Enriched metadata** — validity ranges, support packages and patches, references, prerequisites, side effects, correction summaries, attachments
 - **Optional correction details** — `fetch(includeCorrections=true)` retrieves detailed ABAP correction instructions (affected objects, per-correction prerequisites) via an additional OData call
 - **Two auth methods** — username/password (recommended) or SAP Passport certificate
 - **MFA/2FA support** — manual code entry in headful mode
