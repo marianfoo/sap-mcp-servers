@@ -1,0 +1,173 @@
+{
+  "$schema": "https://unpkg.com/@anthropic-ai/mcpb@latest/schemas/mcpb-manifest-v0.2.schema.json",
+  "manifest_version": "0.2",
+  "name": "sap-notes",
+  "display_name": "SAP Notes",
+  "version": "0.3.5",
+  "description": "Search and retrieve SAP Notes and Knowledge Base Articles.",
+  "long_description": "SAP Notes connects MCP clients to SAP for Me and provides tools to search SAP Notes and Knowledge Base Articles, fetch complete note details, and optionally retrieve correction instructions. It supports username/password, SAP Passport certificate, and shared SSO storage-state authentication.",
+  "icon": "icon.png",
+  "author": {
+    "name": "Marian Zeis",
+    "url": "https://github.com/marianfoo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marianfoo/sap-mcp-servers.git"
+  },
+  "homepage": "https://github.com/marianfoo/sap-mcp-servers/tree/main/packages/notes",
+  "documentation": "https://github.com/marianfoo/sap-mcp-servers/tree/main/packages/notes#readme",
+  "support": "https://github.com/marianfoo/sap-mcp-servers/issues",
+  "server": {
+    "type": "node",
+    "entry_point": "npx",
+    "mcp_config": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "sap-note-search-mcp"
+      ],
+      "env": {
+        "SAP_USERNAME": "${user_config.sap_username}",
+        "SAP_PASSWORD": "${user_config.sap_password}",
+        "AUTH_METHOD": "${user_config.auth_method}",
+        "SAP_LOGIN_URL": "${user_config.sap_login_url}",
+        "MFA_TIMEOUT": "${user_config.mfa_timeout}",
+        "MAX_JWT_AGE_H": "${user_config.max_jwt_age_h}",
+        "HEADFUL": "${user_config.headful}",
+        "LOG_LEVEL": "${user_config.log_level}",
+        "SAP_SSO_STORAGE_STATE": "${user_config.sap_sso_storage_state}",
+        "PFX_PATH": "${user_config.pfx_path}",
+        "PFX_PASSPHRASE": "${user_config.pfx_passphrase}",
+        "SAP_NOTES_TOKEN_CACHE_FILE": "${user_config.sap_notes_token_cache_file}",
+        "TOKEN_CACHE_FILE": "${user_config.sap_notes_token_cache_file}",
+        "PLAYWRIGHT_BROWSER_TYPE": "${user_config.playwright_browser_type}",
+        "ENV_FILE": "${user_config.env_file}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "search",
+      "description": "Search SAP Notes and Knowledge Base Articles by keywords."
+    },
+    {
+      "name": "fetch",
+      "description": "Fetch the complete details and optional correction instructions for an SAP Note."
+    }
+  ],
+  "keywords": [
+    "sap",
+    "notes",
+    "knowledge-base",
+    "support",
+    "mcp"
+  ],
+  "license": "Apache-2.0",
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=22.12.0"
+    }
+  },
+  "user_config": {
+    "sap_username": {
+      "type": "string",
+      "title": "SAP Username",
+      "description": "Your SAP for Me login username, usually your email address.",
+      "required": true
+    },
+    "sap_password": {
+      "type": "string",
+      "title": "SAP Password",
+      "description": "Your SAP for Me password, stored securely by the MCP host.",
+      "required": true,
+      "sensitive": true
+    },
+    "auth_method": {
+      "type": "string",
+      "title": "Authentication Method",
+      "description": "Authentication method: auto, password, or certificate. Auto tries configured credentials in the supported order.",
+      "required": false,
+      "default": "auto"
+    },
+    "sap_login_url": {
+      "type": "string",
+      "title": "SAP Login URL",
+      "description": "SAP for Me login page used to establish an authenticated session.",
+      "required": false,
+      "default": "https://me.sap.com/home"
+    },
+    "mfa_timeout": {
+      "type": "number",
+      "title": "MFA Timeout",
+      "description": "Maximum time in milliseconds to wait for manual multi-factor authentication.",
+      "required": false,
+      "default": 120000
+    },
+    "max_jwt_age_h": {
+      "type": "number",
+      "title": "Session Cache Lifetime",
+      "description": "Maximum age in hours for a cached SAP session before re-authentication.",
+      "required": false,
+      "default": 12
+    },
+    "headful": {
+      "type": "boolean",
+      "title": "Show Authentication Browser",
+      "description": "Show the browser window during authentication; useful for manual MFA and troubleshooting.",
+      "required": false,
+      "default": false
+    },
+    "log_level": {
+      "type": "string",
+      "title": "Log Level",
+      "description": "Logging verbosity: debug, info, warn, or error.",
+      "required": false,
+      "default": "info"
+    },
+    "sap_sso_storage_state": {
+      "type": "file",
+      "title": "Shared SAP SSO Storage State",
+      "description": "Path to a Playwright storage-state JSON file used to share an existing SAP SSO session.",
+      "required": false,
+      "default": "~/.sap-mcp/sso-storage-state.json"
+    },
+    "pfx_path": {
+      "type": "file",
+      "title": "SAP Passport Certificate",
+      "description": "Optional path to an SAP Passport certificate in PFX format for certificate authentication.",
+      "required": false
+    },
+    "pfx_passphrase": {
+      "type": "string",
+      "title": "Certificate Passphrase",
+      "description": "Optional passphrase for the SAP Passport certificate, stored securely by the MCP host.",
+      "required": false,
+      "sensitive": true
+    },
+    "sap_notes_token_cache_file": {
+      "type": "file",
+      "title": "Token Cache File",
+      "description": "Path used to persist the cached SAP Notes session tokens.",
+      "required": false,
+      "default": "./token-cache.json"
+    },
+    "playwright_browser_type": {
+      "type": "string",
+      "title": "Playwright Browser Type",
+      "description": "Optional Playwright browser engine override: chromium, firefox, or webkit.",
+      "required": false
+    },
+    "env_file": {
+      "type": "file",
+      "title": "Environment File",
+      "description": "Optional path to an additional dotenv file loaded before the server starts.",
+      "required": false
+    }
+  }
+}

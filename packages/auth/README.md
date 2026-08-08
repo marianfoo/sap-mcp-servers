@@ -154,6 +154,8 @@ const config = loadAuthConfigFromEnv({
 | `SAP_SSO_STORAGE_STATE` | Path to the shared SSO storage-state file |
 | `PLAYWRIGHT_BROWSER_TYPE` | `chromium` (default) \| `firefox` \| `webkit` |
 
+When loading configuration from a `.env` file, quote any value containing `#`; dotenv otherwise treats `#` and everything after it as a comment. For example, use `SAP_PASSWORD="My#Pass"`. The same applies to `PFX_PASSPHRASE`.
+
 ### Also exported
 
 `isOnAuthPage`, `isAuthUrl`, `selectCookies`, `serializeCookies`, `defaultLogger`, and the error classes `AuthenticationError`, `CertificateLoadError`, `AuthenticationTimeoutError`, `BrowserNotFoundError`. The `Logger` interface lets you inject your own logger (`{ warn, error, info, debug }`); a stderr `defaultLogger` is used otherwise.
