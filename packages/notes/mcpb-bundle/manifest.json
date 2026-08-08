@@ -3,7 +3,7 @@
   "manifest_version": "0.2",
   "name": "sap-notes",
   "display_name": "SAP Notes",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Search and retrieve SAP Notes and Knowledge Base Articles.",
   "long_description": "SAP Notes connects MCP clients to SAP for Me and provides tools to search SAP Notes and Knowledge Base Articles, fetch complete note details, and optionally retrieve correction instructions. It supports username/password, SAP Passport certificate, and shared SSO storage-state authentication.",
   "icon": "icon.png",
