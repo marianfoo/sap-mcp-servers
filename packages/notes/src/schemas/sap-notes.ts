@@ -265,6 +265,7 @@ export const NoteGetOutputSchema = {
         noteNumber: z.string(),
         title: z.string(),
       })).optional(),
+      downloadUrl: z.string().optional(),
     }))
     .optional()
     .describe('Detailed correction instructions (only when includeCorrections=true). Lists affected ABAP objects and per-correction prerequisites.'),

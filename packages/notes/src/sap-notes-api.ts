@@ -605,6 +605,11 @@ export class SapNotesApiClient {
             sapNotesTitle: entry.SapNotesTitle || '',
           };
 
+          // Populated only for Transport-Based Correction Instructions (TCI): the transport
+          // package on softwaredownloads.sap.com. Absent for classic correction instructions,
+          // so it doubles as a structural TCI indicator.
+          if (entry.DownloadURL) correction.downloadUrl = entry.DownloadURL;
+
           // Fetch TADIR (affected objects) — optional, may fail
           try {
             const tadirEntries = await this.fetchCorrInsNavigation(entry, 'TADIR', token);
@@ -650,8 +655,10 @@ export class SapNotesApiClient {
    */
   private async fetchCorrInsSet(paddedNoteId: string, pakId: string, token: string): Promise<any[]> {
     const json: any = await this.fetchBackendJson(CORRINS_PATH, token, {
+      $skip: '0',
+      $top: '100',
       $filter: `SapNotesNumber eq '${escapeODataString(paddedNoteId)}' and PakId eq '${escapeODataString(pakId)}'`,
-      $format: 'json'
+      $inlinecount: 'allpages'
     });
     return Array.isArray(json?.d?.results) ? json.d.results : [];
   }
@@ -677,7 +684,7 @@ export class SapNotesApiClient {
     const json: any = await this.fetchBackendJson(
       `${CORRINS_PATH}(${keyParts})/${navProperty}`,
       token,
-      { $format: 'json' }
+      { $skip: '0', $top: '100', $inlinecount: 'allpages' }
     );
     if (Array.isArray(json?.d?.results)) return json.d.results;
     if (json?.d && typeof json.d === 'object') return [json.d];
