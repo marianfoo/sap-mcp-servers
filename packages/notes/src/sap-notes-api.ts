@@ -1,5 +1,8 @@
 import type { ServerConfig } from './types.js';
 import { logger } from './logger.js';
+
+const CORRINS_PATH =
+  '/backend/raw/core/W7LegacyProxyVerticle/odata/svt/snogwscorrins/CorrInsSet';
 import { existsSync } from 'fs';
 import {
   chromium,
@@ -95,6 +98,8 @@ export interface SapNoteDetail {
   };
   attachments?: Array<{ filename: string; url?: string }>;
   downloadUrl?: string;
+  /** Ready-to-use PDF ("PDF Version") URL for the note, when SAP for Me provides one. */
+  pdfUrl?: string;
 }
 
 /**
@@ -633,24 +638,10 @@ export class SapNotesApiClient {
    * Fetch CorrInsSet entries for a note + software component from the OData service.
    */
   private async fetchCorrInsSet(paddedNoteId: string, pakId: string, token: string): Promise<any[]> {
-    const odataUrl = `https://me.sap.com/backend/raw/core/W7LegacyProxyVerticle/odata/svt/snogwscorrins/CorrInsSet?$filter=SapNotesNumber eq '${paddedNoteId}' and PakId eq '${pakId}'&$format=json`;
-
-    const cookies = await this.formatCookiesForAPI(token);
-    const response = await fetch(odataUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Cookie': cookies,
-        'Referer': 'https://me.sap.com/',
-        'Origin': 'https://me.sap.com',
-      },
+    const json: any = await this.fetchBackendJson(CORRINS_PATH, token, {
+      $filter: `SapNotesNumber eq '${paddedNoteId}' and PakId eq '${pakId}'`,
+      $format: 'json'
     });
-
-    if (!response.ok) {
-      throw new Error(`CorrInsSet HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const json = await response.json();
     return json?.d?.results || [];
   }
 
@@ -658,7 +649,6 @@ export class SapNotesApiClient {
    * Fetch a navigation property (TADIR or Prerequisite) for a specific CorrIns entry.
    */
   private async fetchCorrInsNavigation(entry: any, navProperty: string, token: string): Promise<any[]> {
-    // Build the entity key from the CorrIns entry
     const keyParts = [
       `Aleid='${entry.Aleid}'`,
       `PakId='${entry.PakId}'`,
@@ -669,25 +659,11 @@ export class SapNotesApiClient {
       `VerTo='${entry.VerTo}'`,
     ].join(',');
 
-    const odataUrl = `https://me.sap.com/backend/raw/core/W7LegacyProxyVerticle/odata/svt/snogwscorrins/CorrInsSet(${keyParts})/${navProperty}?$format=json`;
-
-    const cookies = await this.formatCookiesForAPI(token);
-    const response = await fetch(odataUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Cookie': cookies,
-        'Referer': 'https://me.sap.com/',
-        'Origin': 'https://me.sap.com',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`${navProperty} HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const json = await response.json();
-    // Navigation property might return results array or a single entity
+    const json: any = await this.fetchBackendJson(
+      `${CORRINS_PATH}(${keyParts})/${navProperty}`,
+      token,
+      { $format: 'json' }
+    );
     if (json?.d?.results) return json.d.results;
     if (json?.d) return [json.d];
     return [];
@@ -1663,61 +1639,83 @@ export class SapNotesApiClient {
    * Extract enriched metadata from the SAP Note Detail API response.
    * All extraction is best-effort — if any section fails, the rest still proceeds.
    */
+  /**
+   * Read a field from a Detail-API item.
+   *
+   * The SAP for Me Detail API is inconsistent: scalar sections (Header, Title, LongText) wrap values
+   * as `{ value: … }`, while table sections (Validity, SupportPackage, CorrectionInstructions,
+   * References, …) return **plain** fields. Accept both, and try several candidate names so the
+   * extraction survives naming differences between sections/releases.
+   */
+  private itemField(item: any, ...names: string[]): any {
+    if (!item) return undefined;
+    for (const name of names) {
+      const raw = item[name];
+      if (raw === undefined || raw === null) continue;
+      const value = (typeof raw === 'object' && !Array.isArray(raw) && 'value' in raw) ? raw.value : raw;
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return undefined;
+  }
+
+  /** Map a reference-style item (References.RefTo/RefBy, Preconditions, SideEffects). */
+  private mapReference(item: any): SapNoteReference {
+    return {
+      noteNumber: String(this.itemField(item, 'RefNumber', 'SAPNoteNumber', 'Number') ?? ''),
+      title: String(this.itemField(item, 'RefTitle', 'Title') ?? ''),
+      noteType: this.itemField(item, 'RefComponent', 'Type')
+    };
+  }
+
   private extractEnrichedMetadata(sapNote: any, detail: SapNoteDetail): void {
-    // Validity (software component version ranges)
+    // Validity (software component version ranges) — items: { SoftwareComponent, From, To }
     try {
       const validityItems = sapNote.Validity?.Items;
       if (Array.isArray(validityItems) && validityItems.length > 0) {
         detail.validity = validityItems.map((item: any) => ({
-          softwareComponent: item.Name?.value || item.SoftwareComponentID?.value || '',
-          versionFrom: item.VersionFrom?.value || '',
-          versionTo: item.VersionTo?.value || ''
+          softwareComponent: String(this.itemField(item, 'SoftwareComponent', 'Name', 'SoftwareComponentID') ?? ''),
+          versionFrom: String(this.itemField(item, 'From', 'VersionFrom') ?? ''),
+          versionTo: String(this.itemField(item, 'To', 'VersionTo') ?? '')
         })).filter((v: SapNoteValidity) => v.softwareComponent);
       }
     } catch (e) { logger.debug(`Validity extraction skipped: ${e}`); }
 
-    // Support Packages
+    // Support Packages — items: { SoftwareComponentVersion, SupportPackage, URL }
     try {
       const spItems = sapNote.SupportPackage?.Items;
       if (Array.isArray(spItems) && spItems.length > 0) {
         detail.supportPackages = spItems.map((item: any) => ({
-          softwareComponent: item.Name?.value || item.SoftwareComponentID?.value || '',
-          name: item.SupportPackageName?.value || item.SPName?.value || '',
-          level: item.Level?.value
-        })).filter((sp: SapNoteSupportPackage) => sp.softwareComponent);
+          softwareComponent: String(this.itemField(item, 'SoftwareComponentVersion', 'SoftwareComponent', 'Name') ?? ''),
+          name: String(this.itemField(item, 'SupportPackage', 'SupportPackageName', 'SPName') ?? ''),
+          level: this.itemField(item, 'Level')
+        })).filter((sp: SapNoteSupportPackage) => sp.softwareComponent || sp.name);
       }
     } catch (e) { logger.debug(`SupportPackage extraction skipped: ${e}`); }
 
-    // Support Package Patches
+    // Support Package Patches — same item shape as Support Packages
     try {
       const sppItems = sapNote.SupportPackagePatch?.Items;
       if (Array.isArray(sppItems) && sppItems.length > 0) {
         detail.supportPackagePatches = sppItems.map((item: any) => ({
-          softwareComponent: item.Name?.value || item.SoftwareComponentID?.value || '',
-          name: item.SupportPackagePatchName?.value || item.SPPName?.value || '',
-          level: item.Level?.value
-        })).filter((sp: SapNoteSupportPackage) => sp.softwareComponent);
+          softwareComponent: String(this.itemField(item, 'SoftwareComponentVersion', 'SoftwareComponent', 'Name') ?? ''),
+          name: String(this.itemField(item, 'SupportPackagePatch', 'SupportPackage', 'SupportPackagePatchName', 'SPPName') ?? ''),
+          level: this.itemField(item, 'Level')
+        })).filter((sp: SapNoteSupportPackage) => sp.softwareComponent || sp.name);
       }
     } catch (e) { logger.debug(`SupportPackagePatch extraction skipped: ${e}`); }
 
-    // References (referencedBy + referencesTo)
+    // References — items: { RefNumber, RefTitle, RefComponent, RefUrl }
     try {
       const refs: SapNoteDetail['references'] = {};
       const refTo = sapNote.References?.RefTo?.Items;
       if (Array.isArray(refTo) && refTo.length > 0) {
-        refs.referencesTo = refTo.map((item: any) => ({
-          noteNumber: item.SAPNoteNumber?.value || item.Number?.value || '',
-          title: item.Title?.value || '',
-          noteType: item.Type?.value
-        })).filter((r: SapNoteReference) => r.noteNumber);
+        const mapped = refTo.map((item: any) => this.mapReference(item)).filter((r: SapNoteReference) => r.noteNumber);
+        if (mapped.length) refs.referencesTo = mapped;
       }
       const refBy = sapNote.References?.RefBy?.Items;
       if (Array.isArray(refBy) && refBy.length > 0) {
-        refs.referencedBy = refBy.map((item: any) => ({
-          noteNumber: item.SAPNoteNumber?.value || item.Number?.value || '',
-          title: item.Title?.value || '',
-          noteType: item.Type?.value
-        })).filter((r: SapNoteReference) => r.noteNumber);
+        const mapped = refBy.map((item: any) => this.mapReference(item)).filter((r: SapNoteReference) => r.noteNumber);
+        if (mapped.length) refs.referencedBy = mapped;
       }
       if (refs.referencesTo || refs.referencedBy) {
         detail.references = refs;
@@ -1728,10 +1726,11 @@ export class SapNotesApiClient {
     try {
       const preItems = sapNote.Preconditions?.Items;
       if (Array.isArray(preItems) && preItems.length > 0) {
-        detail.prerequisites = preItems.map((item: any) => ({
-          noteNumber: item.SAPNoteNumber?.value || item.Number?.value || '',
-          title: item.Title?.value || ''
-        })).filter((p: SapNoteReference) => p.noteNumber);
+        const mapped = preItems
+          .map((item: any) => this.mapReference(item))
+          .filter((p: SapNoteReference) => p.noteNumber)
+          .map(({ noteNumber, title }: SapNoteReference) => ({ noteNumber, title }));
+        if (mapped.length) detail.prerequisites = mapped;
       }
     } catch (e) { logger.debug(`Prerequisites extraction skipped: ${e}`); }
 
@@ -1757,15 +1756,21 @@ export class SapNotesApiClient {
       }
     } catch (e) { logger.debug(`SideEffects extraction skipped: ${e}`); }
 
-    // Correction Instructions summary (from Detail API — just the list, not the OData detail)
+    // Correction Instructions summary (from Detail API — just the list, not the OData detail).
+    // Items look like: { SoftwareComponent: "SAP_BASIS", NumberOfCorrin: 11, URL: "/corrins/0003096734/41" }
+    // The trailing URL segment is the PakId that CorrInsSet needs.
     try {
       const corrItems = sapNote.CorrectionInstructions?.Items;
       if (Array.isArray(corrItems) && corrItems.length > 0) {
-        detail.correctionsSummary = corrItems.map((item: any) => ({
-          softwareComponent: item.Name?.value || item.SoftwareComponentName?.value || '',
-          pakId: item.URL?.value?.match(/corrins\/\d+\/(\d+)/)?.[1] || item.PakId?.value || '',
-          count: item.Count?.value ? parseInt(item.Count.value, 10) : undefined
-        })).filter((c: SapNoteCorrectionSummary) => c.softwareComponent);
+        detail.correctionsSummary = corrItems.map((item: any) => {
+          const url = String(this.itemField(item, 'URL', 'Url') ?? '');
+          const count = this.itemField(item, 'NumberOfCorrin', 'Count');
+          return {
+            softwareComponent: String(this.itemField(item, 'SoftwareComponent', 'Name', 'SoftwareComponentName') ?? ''),
+            pakId: String(url.match(/corrins\/\d+\/(\d+)/)?.[1] ?? this.itemField(item, 'PakId') ?? ''),
+            count: count != null ? Number.parseInt(String(count), 10) : undefined
+          };
+        }).filter((c: SapNoteCorrectionSummary) => c.softwareComponent && c.pakId);
       }
     } catch (e) { logger.debug(`CorrectionInstructions summary extraction skipped: ${e}`); }
 
@@ -1777,15 +1782,24 @@ export class SapNotesApiClient {
       }
     } catch (e) { logger.debug(`ManualActions extraction skipped: ${e}`); }
 
-    // Corrections Info (summary counts)
+    // Corrections Info (summary counts) — the API names these
+    // { Corrections: {value}, ManualActivities: {value}, Prerequisites: {value} }
     try {
       const corrInfo = sapNote.CorrectionsInfo;
       if (corrInfo) {
-        detail.correctionsInfo = {
-          totalCorrections: corrInfo.TotalCorrections?.value ? parseInt(corrInfo.TotalCorrections.value, 10) : undefined,
-          totalManualActivities: corrInfo.TotalManualActivities?.value ? parseInt(corrInfo.TotalManualActivities.value, 10) : undefined,
-          totalPrerequisites: corrInfo.TotalPrerequisites?.value ? parseInt(corrInfo.TotalPrerequisites.value, 10) : undefined
+        const num = (...names: string[]) => {
+          const v = this.itemField(corrInfo, ...names);
+          if (v === undefined) return undefined;
+          const n = Number.parseInt(String(v), 10);
+          return Number.isNaN(n) ? undefined : n;
         };
+        const info = {
+          totalCorrections: num('Corrections', 'TotalCorrections'),
+          totalManualActivities: num('ManualActivities', 'TotalManualActivities'),
+          totalPrerequisites: num('Prerequisites', 'TotalPrerequisites')
+        };
+        // Only attach when at least one count is present, so callers don't get an empty object.
+        if (Object.values(info).some(v => v !== undefined)) detail.correctionsInfo = info;
       }
     } catch (e) { logger.debug(`CorrectionsInfo extraction skipped: ${e}`); }
 
@@ -1800,13 +1814,22 @@ export class SapNotesApiClient {
       }
     } catch (e) { logger.debug(`Attachments extraction skipped: ${e}`); }
 
-    // Download URL
+    // Download URL (SNOTE download — for importing the note into a system)
     try {
       const downloadUrl = sapNote.Actions?.Download?.url;
       if (downloadUrl) {
         detail.downloadUrl = downloadUrl;
       }
     } catch (e) { logger.debug(`DownloadURL extraction skipped: ${e}`); }
+
+    // PDF URL — the "PDF Version" action carries a ready-to-use, token-bearing print URL.
+    // Distinct from downloadUrl above, which is the SNOTE package, not a readable document.
+    try {
+      const pdfUrl = sapNote.Actions?.Print?.url;
+      if (pdfUrl) {
+        detail.pdfUrl = pdfUrl;
+      }
+    } catch (e) { logger.debug(`PDF URL extraction skipped: ${e}`); }
   }
 
   private sanitizeCookiesForStorageState(cookies: any[]): Array<{

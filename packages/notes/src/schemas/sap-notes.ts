@@ -277,6 +277,11 @@ export const NoteGetOutputSchema = {
     .string()
     .optional()
     .describe('SNOTE download URL for automatic correction import.'),
+
+  pdfUrl: z
+    .string()
+    .optional()
+    .describe('Ready-to-use PDF version URL of the note (token-bearing print link).'),
 };
 
 // ─── TOOL DESCRIPTIONS ─────────────────────────────────────────────────────

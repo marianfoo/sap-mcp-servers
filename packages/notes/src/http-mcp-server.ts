@@ -364,6 +364,7 @@ class HttpSapNoteMcpServer {
           if (noteDetail.manualActions) output.manualActions = noteDetail.manualActions;
           if (noteDetail.attachments?.length) output.attachments = noteDetail.attachments;
           if (noteDetail.downloadUrl) output.downloadUrl = noteDetail.downloadUrl;
+          if (noteDetail.pdfUrl) output.pdfUrl = noteDetail.pdfUrl;
 
           // Format display text
           let resultText = `**SAP Note ${output.id} - ${output.title}**\n\n`;
