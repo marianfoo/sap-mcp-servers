@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.5...sap-note-search-mcp-v0.3.6) (2026-08-08)
+
+
+### Bug Fixes
+
+* **notes:** extract and harden Detail enriched metadata ([#43](https://github.com/marianfoo/sap-mcp-servers/issues/43)) ([a97b25c](https://github.com/marianfoo/sap-mcp-servers/commit/a97b25c9eca0903fda5cd8d79c240a1ff1601dcb))
+
 ## [0.3.5](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.4...sap-note-search-mcp-v0.3.5) (2026-08-05)
 
 
