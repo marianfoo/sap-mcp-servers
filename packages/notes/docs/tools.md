@@ -89,6 +89,11 @@ Fetch the complete content and metadata for a specific SAP Note by ID. Returns f
     name: string;
     level?: string;
   }>;
+  supportPackagePatches?: Array<{      // Support Package patches containing the fix
+    softwareComponent: string;
+    name: string;
+    level?: string;
+  }>;
   references?: {                      // Cross-references
     referencesTo?: Array<{ noteNumber: string; title: string; noteType?: string }>;
     referencedBy?: Array<{ noteNumber: string; title: string; noteType?: string }>;

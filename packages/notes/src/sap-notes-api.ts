@@ -1,8 +1,5 @@
 import type { ServerConfig } from './types.js';
 import { logger } from './logger.js';
-
-const CORRINS_PATH =
-  '/backend/raw/core/W7LegacyProxyVerticle/odata/svt/snogwscorrins/CorrInsSet';
 import { existsSync } from 'fs';
 import {
   chromium,
@@ -21,6 +18,19 @@ import {
   isAuthenticationBootstrapResponse,
   mapSapNotesSearchResponse
 } from './sap-notes-backend.js';
+
+const CORRINS_PATH =
+  '/backend/raw/core/W7LegacyProxyVerticle/odata/svt/snogwscorrins/CorrInsSet';
+
+type CorrInsNavigationProperty = 'TADIR' | 'Prerequisite';
+
+function escapeODataString(value: unknown): string {
+  return String(value ?? '').replaceAll("'", "''");
+}
+
+function isSessionExpiredError(error: unknown): boolean {
+  return (error instanceof Error ? error.message : String(error)).includes('SESSION_EXPIRED');
+}
 
 export interface SapNoteResult {
   id: string;
@@ -98,8 +108,6 @@ export interface SapNoteDetail {
   };
   attachments?: Array<{ filename: string; url?: string }>;
   downloadUrl?: string;
-  /** Ready-to-use PDF ("PDF Version") URL for the note, when SAP for Me provides one. */
-  pdfUrl?: string;
 }
 
 /**
@@ -607,6 +615,7 @@ export class SapNotesApiClient {
               })).filter((o: any) => o.objectName);
             }
           } catch (tadirErr) {
+            if (isSessionExpiredError(tadirErr)) throw tadirErr;
             logger.debug(`TADIR fetch failed for correction ${entry.Aleid}: ${tadirErr}`);
           }
 
@@ -620,12 +629,14 @@ export class SapNotesApiClient {
               })).filter((p: any) => p.noteNumber);
             }
           } catch (preErr) {
+            if (isSessionExpiredError(preErr)) throw preErr;
             logger.debug(`Prerequisite fetch failed for correction ${entry.Aleid}: ${preErr}`);
           }
 
           allCorrections.push(correction);
         }
       } catch (compError) {
+        if (isSessionExpiredError(compError)) throw compError;
         logger.warn(`⚠️ Correction fetch failed for PakId=${pakId} (non-fatal): ${compError instanceof Error ? compError.message : String(compError)}`);
       }
     }
@@ -639,24 +650,28 @@ export class SapNotesApiClient {
    */
   private async fetchCorrInsSet(paddedNoteId: string, pakId: string, token: string): Promise<any[]> {
     const json: any = await this.fetchBackendJson(CORRINS_PATH, token, {
-      $filter: `SapNotesNumber eq '${paddedNoteId}' and PakId eq '${pakId}'`,
+      $filter: `SapNotesNumber eq '${escapeODataString(paddedNoteId)}' and PakId eq '${escapeODataString(pakId)}'`,
       $format: 'json'
     });
-    return json?.d?.results || [];
+    return Array.isArray(json?.d?.results) ? json.d.results : [];
   }
 
   /**
    * Fetch a navigation property (TADIR or Prerequisite) for a specific CorrIns entry.
    */
-  private async fetchCorrInsNavigation(entry: any, navProperty: string, token: string): Promise<any[]> {
+  private async fetchCorrInsNavigation(
+    entry: any,
+    navProperty: CorrInsNavigationProperty,
+    token: string
+  ): Promise<any[]> {
     const keyParts = [
-      `Aleid='${entry.Aleid}'`,
-      `PakId='${entry.PakId}'`,
-      `Insta='${entry.Insta}'`,
-      `Vernr='${entry.Vernr}'`,
-      `Name='${entry.Name}'`,
-      `VerFrom='${entry.VerFrom}'`,
-      `VerTo='${entry.VerTo}'`,
+      `Aleid='${escapeODataString(entry.Aleid)}'`,
+      `PakId='${escapeODataString(entry.PakId)}'`,
+      `Insta='${escapeODataString(entry.Insta)}'`,
+      `Vernr='${escapeODataString(entry.Vernr)}'`,
+      `Name='${escapeODataString(entry.Name)}'`,
+      `VerFrom='${escapeODataString(entry.VerFrom)}'`,
+      `VerTo='${escapeODataString(entry.VerTo)}'`,
     ].join(',');
 
     const json: any = await this.fetchBackendJson(
@@ -664,8 +679,8 @@ export class SapNotesApiClient {
       token,
       { $format: 'json' }
     );
-    if (json?.d?.results) return json.d.results;
-    if (json?.d) return [json.d];
+    if (Array.isArray(json?.d?.results)) return json.d.results;
+    if (json?.d && typeof json.d === 'object') return [json.d];
     return [];
   }
 
@@ -1636,10 +1651,6 @@ export class SapNotesApiClient {
   }
 
   /**
-   * Extract enriched metadata from the SAP Note Detail API response.
-   * All extraction is best-effort — if any section fails, the rest still proceeds.
-   */
-  /**
    * Read a field from a Detail-API item.
    *
    * The SAP for Me Detail API is inconsistent: scalar sections (Header, Title, LongText) wrap values
@@ -1658,25 +1669,65 @@ export class SapNotesApiClient {
     return undefined;
   }
 
+  /** Read and normalize a scalar string from either Detail-API field shape. */
+  private stringField(item: any, ...names: string[]): string | undefined {
+    const value = this.itemField(item, ...names);
+    if (typeof value === 'string') {
+      const normalized = value.trim();
+      return normalized || undefined;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    return undefined;
+  }
+
+  /** Read a non-negative integer without accepting partially numeric strings. */
+  private integerField(item: any, ...names: string[]): number | undefined {
+    const value = this.itemField(item, ...names);
+    if (typeof value === 'number') {
+      return Number.isInteger(value) && value >= 0 ? value : undefined;
+    }
+    if (typeof value !== 'string' || !/^\d+$/.test(value.trim())) return undefined;
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  }
+
   /** Map a reference-style item (References.RefTo/RefBy, Preconditions, SideEffects). */
   private mapReference(item: any): SapNoteReference {
     return {
-      noteNumber: String(this.itemField(item, 'RefNumber', 'SAPNoteNumber', 'Number') ?? ''),
-      title: String(this.itemField(item, 'RefTitle', 'Title') ?? ''),
-      noteType: this.itemField(item, 'RefComponent', 'Type')
+      noteNumber: this.stringField(item, 'RefNumber', 'SAPNoteNumber', 'Number') ?? '',
+      title: this.stringField(item, 'RefTitle', 'Title') ?? '',
+      noteType: this.stringField(item, 'RefComponent', 'Component', 'Type')
     };
   }
 
+  /** Collapse version-specific duplicate rows into one reference per note. */
+  private mapUniqueReferences(items: any[]): SapNoteReference[] {
+    const references: SapNoteReference[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      const reference = this.mapReference(item);
+      if (!reference.noteNumber || seen.has(reference.noteNumber)) continue;
+      seen.add(reference.noteNumber);
+      references.push(reference);
+    }
+    return references;
+  }
+
+  /**
+   * Extract enriched metadata from the SAP Note Detail API response.
+   * All extraction is best-effort — if any section fails, the rest still proceeds.
+   */
   private extractEnrichedMetadata(sapNote: any, detail: SapNoteDetail): void {
     // Validity (software component version ranges) — items: { SoftwareComponent, From, To }
     try {
       const validityItems = sapNote.Validity?.Items;
       if (Array.isArray(validityItems) && validityItems.length > 0) {
-        detail.validity = validityItems.map((item: any) => ({
-          softwareComponent: String(this.itemField(item, 'SoftwareComponent', 'Name', 'SoftwareComponentID') ?? ''),
-          versionFrom: String(this.itemField(item, 'From', 'VersionFrom') ?? ''),
-          versionTo: String(this.itemField(item, 'To', 'VersionTo') ?? '')
+        const mapped = validityItems.map((item: any) => ({
+          softwareComponent: this.stringField(item, 'SoftwareComponent', 'Name', 'SoftwareComponentID') ?? '',
+          versionFrom: this.stringField(item, 'From', 'VersionFrom') ?? '',
+          versionTo: this.stringField(item, 'To', 'VersionTo') ?? ''
         })).filter((v: SapNoteValidity) => v.softwareComponent);
+        if (mapped.length) detail.validity = mapped;
       }
     } catch (e) { logger.debug(`Validity extraction skipped: ${e}`); }
 
@@ -1684,11 +1735,12 @@ export class SapNotesApiClient {
     try {
       const spItems = sapNote.SupportPackage?.Items;
       if (Array.isArray(spItems) && spItems.length > 0) {
-        detail.supportPackages = spItems.map((item: any) => ({
-          softwareComponent: String(this.itemField(item, 'SoftwareComponentVersion', 'SoftwareComponent', 'Name') ?? ''),
-          name: String(this.itemField(item, 'SupportPackage', 'SupportPackageName', 'SPName') ?? ''),
-          level: this.itemField(item, 'Level')
+        const mapped = spItems.map((item: any) => ({
+          softwareComponent: this.stringField(item, 'SoftwareComponentVersion', 'SoftwareComponent', 'Name') ?? '',
+          name: this.stringField(item, 'SupportPackage', 'SupportPackageName', 'SPName') ?? '',
+          level: this.stringField(item, 'Level')
         })).filter((sp: SapNoteSupportPackage) => sp.softwareComponent || sp.name);
+        if (mapped.length) detail.supportPackages = mapped;
       }
     } catch (e) { logger.debug(`SupportPackage extraction skipped: ${e}`); }
 
@@ -1696,11 +1748,12 @@ export class SapNotesApiClient {
     try {
       const sppItems = sapNote.SupportPackagePatch?.Items;
       if (Array.isArray(sppItems) && sppItems.length > 0) {
-        detail.supportPackagePatches = sppItems.map((item: any) => ({
-          softwareComponent: String(this.itemField(item, 'SoftwareComponentVersion', 'SoftwareComponent', 'Name') ?? ''),
-          name: String(this.itemField(item, 'SupportPackagePatch', 'SupportPackage', 'SupportPackagePatchName', 'SPPName') ?? ''),
-          level: this.itemField(item, 'Level')
+        const mapped = sppItems.map((item: any) => ({
+          softwareComponent: this.stringField(item, 'SoftwareComponentVersion', 'SoftwareComponent', 'Name') ?? '',
+          name: this.stringField(item, 'SupportPackagePatch', 'SupportPackage', 'SupportPackagePatchName', 'SPPName') ?? '',
+          level: this.stringField(item, 'Level')
         })).filter((sp: SapNoteSupportPackage) => sp.softwareComponent || sp.name);
+        if (mapped.length) detail.supportPackagePatches = mapped;
       }
     } catch (e) { logger.debug(`SupportPackagePatch extraction skipped: ${e}`); }
 
@@ -1709,12 +1762,12 @@ export class SapNotesApiClient {
       const refs: SapNoteDetail['references'] = {};
       const refTo = sapNote.References?.RefTo?.Items;
       if (Array.isArray(refTo) && refTo.length > 0) {
-        const mapped = refTo.map((item: any) => this.mapReference(item)).filter((r: SapNoteReference) => r.noteNumber);
+        const mapped = this.mapUniqueReferences(refTo);
         if (mapped.length) refs.referencesTo = mapped;
       }
       const refBy = sapNote.References?.RefBy?.Items;
       if (Array.isArray(refBy) && refBy.length > 0) {
-        const mapped = refBy.map((item: any) => this.mapReference(item)).filter((r: SapNoteReference) => r.noteNumber);
+        const mapped = this.mapUniqueReferences(refBy);
         if (mapped.length) refs.referencedBy = mapped;
       }
       if (refs.referencesTo || refs.referencedBy) {
@@ -1726,9 +1779,7 @@ export class SapNotesApiClient {
     try {
       const preItems = sapNote.Preconditions?.Items;
       if (Array.isArray(preItems) && preItems.length > 0) {
-        const mapped = preItems
-          .map((item: any) => this.mapReference(item))
-          .filter((p: SapNoteReference) => p.noteNumber)
+        const mapped = this.mapUniqueReferences(preItems)
           .map(({ noteNumber, title }: SapNoteReference) => ({ noteNumber, title }));
         if (mapped.length) detail.prerequisites = mapped;
       }
@@ -1739,17 +1790,13 @@ export class SapNotesApiClient {
       const sideEffects: SapNoteDetail['sideEffects'] = {};
       const causing = sapNote.SideEffects?.SideEffectsCausing?.Items;
       if (Array.isArray(causing) && causing.length > 0) {
-        sideEffects.causing = causing.map((item: any) => ({
-          noteNumber: item.SAPNoteNumber?.value || item.Number?.value || '',
-          title: item.Title?.value || ''
-        })).filter((s: SapNoteReference) => s.noteNumber);
+        const mapped = this.mapUniqueReferences(causing);
+        if (mapped.length) sideEffects.causing = mapped;
       }
       const solving = sapNote.SideEffects?.SideEffectsSolving?.Items;
       if (Array.isArray(solving) && solving.length > 0) {
-        sideEffects.solving = solving.map((item: any) => ({
-          noteNumber: item.SAPNoteNumber?.value || item.Number?.value || '',
-          title: item.Title?.value || ''
-        })).filter((s: SapNoteReference) => s.noteNumber);
+        const mapped = this.mapUniqueReferences(solving);
+        if (mapped.length) sideEffects.solving = mapped;
       }
       if (sideEffects.causing || sideEffects.solving) {
         detail.sideEffects = sideEffects;
@@ -1762,15 +1809,17 @@ export class SapNotesApiClient {
     try {
       const corrItems = sapNote.CorrectionInstructions?.Items;
       if (Array.isArray(corrItems) && corrItems.length > 0) {
-        detail.correctionsSummary = corrItems.map((item: any) => {
-          const url = String(this.itemField(item, 'URL', 'Url') ?? '');
-          const count = this.itemField(item, 'NumberOfCorrin', 'Count');
-          return {
-            softwareComponent: String(this.itemField(item, 'SoftwareComponent', 'Name', 'SoftwareComponentName') ?? ''),
-            pakId: String(url.match(/corrins\/\d+\/(\d+)/)?.[1] ?? this.itemField(item, 'PakId') ?? ''),
-            count: count != null ? Number.parseInt(String(count), 10) : undefined
+        const mapped = corrItems.map((item: any) => {
+          const url = this.stringField(item, 'URL', 'Url') ?? '';
+          const count = this.integerField(item, 'NumberOfCorrin', 'Count');
+          const summary: SapNoteCorrectionSummary = {
+            softwareComponent: this.stringField(item, 'SoftwareComponent', 'Name', 'SoftwareComponentName') ?? '',
+            pakId: url.match(/corrins\/\d+\/([^/?#]+)/)?.[1] ?? this.stringField(item, 'PakId') ?? ''
           };
+          if (count !== undefined) summary.count = count;
+          return summary;
         }).filter((c: SapNoteCorrectionSummary) => c.softwareComponent && c.pakId);
+        if (mapped.length) detail.correctionsSummary = mapped;
       }
     } catch (e) { logger.debug(`CorrectionInstructions summary extraction skipped: ${e}`); }
 
@@ -1787,16 +1836,10 @@ export class SapNotesApiClient {
     try {
       const corrInfo = sapNote.CorrectionsInfo;
       if (corrInfo) {
-        const num = (...names: string[]) => {
-          const v = this.itemField(corrInfo, ...names);
-          if (v === undefined) return undefined;
-          const n = Number.parseInt(String(v), 10);
-          return Number.isNaN(n) ? undefined : n;
-        };
         const info = {
-          totalCorrections: num('Corrections', 'TotalCorrections'),
-          totalManualActivities: num('ManualActivities', 'TotalManualActivities'),
-          totalPrerequisites: num('Prerequisites', 'TotalPrerequisites')
+          totalCorrections: this.integerField(corrInfo, 'Corrections', 'TotalCorrections'),
+          totalManualActivities: this.integerField(corrInfo, 'ManualActivities', 'TotalManualActivities'),
+          totalPrerequisites: this.integerField(corrInfo, 'Prerequisites', 'TotalPrerequisites')
         };
         // Only attach when at least one count is present, so callers don't get an empty object.
         if (Object.values(info).some(v => v !== undefined)) detail.correctionsInfo = info;
@@ -1807,29 +1850,23 @@ export class SapNotesApiClient {
     try {
       const attachItems = sapNote.Attachments?.Items;
       if (Array.isArray(attachItems) && attachItems.length > 0) {
-        detail.attachments = attachItems.map((item: any) => ({
-          filename: item.Filename?.value || item.Name?.value || 'unknown',
-          url: item.URL?.value
-        }));
+        const mapped = attachItems.map((item: any) => {
+          const filename = this.stringField(item, 'FileName', 'Filename', 'Name');
+          const url = this.stringField(item, 'URL', 'Url');
+          if (!filename && !url) return null;
+          return { filename: filename ?? 'unknown', ...(url ? { url } : {}) };
+        }).filter((item): item is { filename: string; url?: string } => item !== null);
+        if (mapped.length) detail.attachments = mapped;
       }
     } catch (e) { logger.debug(`Attachments extraction skipped: ${e}`); }
 
     // Download URL (SNOTE download — for importing the note into a system)
     try {
-      const downloadUrl = sapNote.Actions?.Download?.url;
+      const downloadUrl = this.stringField(sapNote.Actions?.Download, 'url', 'URL');
       if (downloadUrl) {
         detail.downloadUrl = downloadUrl;
       }
     } catch (e) { logger.debug(`DownloadURL extraction skipped: ${e}`); }
-
-    // PDF URL — the "PDF Version" action carries a ready-to-use, token-bearing print URL.
-    // Distinct from downloadUrl above, which is the SNOTE package, not a readable document.
-    try {
-      const pdfUrl = sapNote.Actions?.Print?.url;
-      if (pdfUrl) {
-        detail.pdfUrl = pdfUrl;
-      }
-    } catch (e) { logger.debug(`PDF URL extraction skipped: ${e}`); }
   }
 
   private sanitizeCookiesForStorageState(cookies: any[]): Array<{

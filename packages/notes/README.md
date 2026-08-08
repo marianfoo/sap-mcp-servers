@@ -5,8 +5,8 @@
 > **MCP server for searching and retrieving SAP Notes / KB articles with full metadata extraction**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue.svg)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D22.12.0-brightgreen.svg)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg)](https://www.typescriptlang.org/)
 
 > [!CAUTION]
 > **This MCP Server uses private APIs from SAP behind authentication. Please check whether the use violates SAP's ToS. The author assumes no liability for this. Because of this i do not guarantee that the server will always work.**
@@ -20,7 +20,7 @@ This [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server giv
 ## Features
 
 - **Two MCP tools** — `search` (find notes) and `fetch` (retrieve full content + metadata)
-- **Enriched metadata** — validity ranges, support packages, references, prerequisites, side effects, correction summaries, attachments
+- **Enriched metadata** — validity ranges, support packages and patches, references, prerequisites, side effects, correction summaries, attachments
 - **Optional correction details** — `fetch(includeCorrections=true)` retrieves detailed ABAP correction instructions (affected objects, per-correction prerequisites) via an additional OData call
 - **Two auth methods** — username/password (recommended) or SAP Passport certificate
 - **MFA/2FA support** — manual code entry in headful mode
@@ -33,7 +33,7 @@ This [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server giv
 
 ### Prerequisites
 
-- **Node.js 18+** — [Download here](https://nodejs.org/)
+- **Node.js 22.12+** — [Download here](https://nodejs.org/)
 - **SAP S-User** — with access to SAP Support Portal / me.sap.com
 - **An MCP client** — [Cursor](https://cursor.sh/), [Claude Desktop](https://claude.ai/download), VS Code with Copilot, etc.
 
