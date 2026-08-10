@@ -179,6 +179,93 @@ test('CorrIns requests use the authenticated backend context and escape OData st
   assert.match(calls[1].path, /Name='O''Hare'/);
   assert.equal(calls[0].token, 'sap-token');
   assert.equal(calls[1].token, 'sap-token');
+  for (const call of calls) {
+    assert.equal(call.params.$skip, '0');
+    assert.equal(call.params.$top, '100');
+    assert.equal(call.params.$inlinecount, 'allpages');
+    assert.equal('$format' in call.params, false);
+  }
+});
+
+test('CorrIns requests retrieve every advertised OData page', async () => {
+  const client = createClient();
+  const calls = [];
+  client.fetchBackendJson = async (_path, _token, params) => {
+    calls.push(params);
+    const skip = Number(params.$skip);
+    const length = skip === 0 ? 100 : 1;
+    return {
+      d: {
+        __count: '101',
+        results: Array.from({ length }, (_, index) => ({ Aleid: String(skip + index) }))
+      }
+    };
+  };
+
+  const rows = await client.fetchCorrInsSet('0003096734', '41', 'sap-token');
+
+  assert.equal(rows.length, 101);
+  assert.equal(rows[100].Aleid, '100');
+  assert.deepEqual(calls.map(call => call.$skip), ['0', '100']);
+  assert.ok(calls.every(call => call.$top === '100'));
+  assert.ok(calls.every(call => !('$format' in call)));
+});
+
+test('CorrIns paging rejects a full page without a valid advertised count', async () => {
+  const client = createClient();
+  client.fetchBackendJson = async () => ({
+    d: {
+      __count: 'not-a-number',
+      results: Array.from({ length: 100 }, (_, index) => ({ Aleid: String(index) }))
+    }
+  });
+
+  await assert.rejects(
+    client.fetchCorrInsSet('0003096734', '41', 'sap-token'),
+    /omitted a valid __count/
+  );
+});
+
+test('correction details normalize TCI URLs and reject non-HTTPS values', async () => {
+  const client = createClient();
+  client.fetchCorrInsSet = async () => [{
+    Name: ' S4CORE ',
+    VerFrom: 106,
+    VerTo: 106,
+    SapNotesNumber: ' 0003195213 ',
+    SapNotesTitle: ' TCI fixture ',
+    DownloadURL: ' https://softwaredownloads.sap.com/file.SAR '
+  }, {
+    Name: 'S4CORE',
+    VerFrom: '107',
+    VerTo: '107',
+    SapNotesNumber: '0003195213',
+    SapNotesTitle: 'Unsafe fixture',
+    DownloadURL: 'javascript:alert(1)'
+  }];
+  client.fetchCorrInsNavigation = async () => [];
+
+  const corrections = await client.getCorrectionDetails(
+    '3195213',
+    [{ softwareComponent: 'S4CORE', pakId: '19773' }],
+    'sap-token'
+  );
+
+  assert.deepEqual(corrections, [{
+    softwareComponent: 'S4CORE',
+    versionFrom: '106',
+    versionTo: '106',
+    sapNotesNumber: '0003195213',
+    sapNotesTitle: 'TCI fixture',
+    downloadUrl: 'https://softwaredownloads.sap.com/file.SAR'
+  }, {
+    softwareComponent: 'S4CORE',
+    versionFrom: '107',
+    versionTo: '107',
+    sapNotesNumber: '0003195213',
+    sapNotesTitle: 'Unsafe fixture'
+  }]);
+  assert.deepEqual(NoteGetOutputSchema.correctionDetails.parse(corrections), corrections);
 });
 
 test('correction-detail lookup propagates session expiry for the auth retry', async () => {
