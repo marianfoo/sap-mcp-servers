@@ -138,7 +138,7 @@ Fetch the complete content and metadata for a specific SAP Note by ID. Returns f
       noteNumber: string;
       title: string;
     }>;
-    downloadUrl?: string;         // TCI only: transport package on softwaredownloads.sap.com
+    downloadUrl?: string;             // TCI only: HTTPS transport package URL
   }>;
 
 **Correction instructions vs. TCI.** Each entry in `correctionDetails` is one correction instruction,
@@ -146,8 +146,8 @@ bound to a software component and a release range (e.g. `SAP_BASIS 700-700`) —
 returns 11 entries, typically one per release. `downloadUrl` is populated **only** for
 Transport-Based Correction Instructions (TCI) and points at the transport package; it is absent for
 classic correction instructions, so it is a reliable way to tell the two apart without parsing note text.
-The package itself is behind SAP SSO and must be downloaded interactively — the URL is provided for
-navigation, not for automated fetching.
+The package itself is behind SAP SSO and must be downloaded interactively — the validated HTTPS URL
+is provided for navigation, not for automated fetching.
 }
 ```
 

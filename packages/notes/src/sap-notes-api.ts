@@ -21,6 +21,7 @@ import {
 
 const CORRINS_PATH =
   '/backend/raw/core/W7LegacyProxyVerticle/odata/svt/snogwscorrins/CorrInsSet';
+const CORRINS_PAGE_SIZE = 100;
 
 type CorrInsNavigationProperty = 'TADIR' | 'Prerequisite';
 
@@ -70,6 +71,17 @@ export interface SapNoteCorrectionSummary {
   softwareComponent: string;
   pakId: string;
   count?: number;
+}
+
+export interface SapNoteCorrectionDetail {
+  softwareComponent: string;
+  versionFrom: string;
+  versionTo: string;
+  sapNotesNumber: string;
+  sapNotesTitle: string;
+  objects?: Array<{ objectName: string; objectType: string }>;
+  prerequisites?: Array<{ noteNumber: string; title: string }>;
+  downloadUrl?: string;
 }
 
 export interface SapNoteDetail {
@@ -574,10 +586,10 @@ export class SapNotesApiClient {
     noteId: string,
     correctionsSummary: SapNoteCorrectionSummary[],
     token: string
-  ): Promise<any[]> {
+  ): Promise<SapNoteCorrectionDetail[]> {
     logger.info(`🔧 Fetching correction details for note ${noteId} (${correctionsSummary.length} components)`);
 
-    const allCorrections: any[] = [];
+    const allCorrections: SapNoteCorrectionDetail[] = [];
     const paddedNoteId = noteId.padStart(10, '0');
 
     for (const summary of correctionsSummary) {
@@ -597,27 +609,29 @@ export class SapNotesApiClient {
 
         // For each correction instruction, fetch TADIR (objects) and Prerequisites
         for (const entry of corrInsEntries) {
-          const correction: any = {
-            softwareComponent: entry.Name || summary.softwareComponent,
-            versionFrom: entry.VerFrom || '',
-            versionTo: entry.VerTo || '',
-            sapNotesNumber: entry.SapNotesNumber || noteId,
-            sapNotesTitle: entry.SapNotesTitle || '',
+          const correction: SapNoteCorrectionDetail = {
+            softwareComponent: this.stringField(entry, 'Name') ?? summary.softwareComponent,
+            versionFrom: this.stringField(entry, 'VerFrom') ?? '',
+            versionTo: this.stringField(entry, 'VerTo') ?? '',
+            sapNotesNumber: this.stringField(entry, 'SapNotesNumber') ?? noteId,
+            sapNotesTitle: this.stringField(entry, 'SapNotesTitle') ?? '',
           };
 
           // Populated only for Transport-Based Correction Instructions (TCI): the transport
           // package on softwaredownloads.sap.com. Absent for classic correction instructions,
           // so it doubles as a structural TCI indicator.
-          if (entry.DownloadURL) correction.downloadUrl = entry.DownloadURL;
+          const downloadUrl = this.httpsUrlField(entry, 'DownloadURL');
+          if (downloadUrl) correction.downloadUrl = downloadUrl;
 
           // Fetch TADIR (affected objects) — optional, may fail
           try {
             const tadirEntries = await this.fetchCorrInsNavigation(entry, 'TADIR', token);
             if (tadirEntries && tadirEntries.length > 0) {
-              correction.objects = tadirEntries.map((t: any) => ({
-                objectName: t.ObjName || '',
-                objectType: t.ObjType || '',
+              const objects = tadirEntries.map((t: any) => ({
+                objectName: this.stringField(t, 'ObjName') ?? '',
+                objectType: this.stringField(t, 'ObjType') ?? '',
               })).filter((o: any) => o.objectName);
+              if (objects.length) correction.objects = objects;
             }
           } catch (tadirErr) {
             if (isSessionExpiredError(tadirErr)) throw tadirErr;
@@ -628,10 +642,9 @@ export class SapNotesApiClient {
           try {
             const preEntries = await this.fetchCorrInsNavigation(entry, 'Prerequisite', token);
             if (preEntries && preEntries.length > 0) {
-              correction.prerequisites = preEntries.map((p: any) => ({
-                noteNumber: p.SapNotesNumber || '',
-                title: p.Title || '',
-              })).filter((p: any) => p.noteNumber);
+              const prerequisites = this.mapUniqueReferences(preEntries)
+                .map(({ noteNumber, title }) => ({ noteNumber, title }));
+              if (prerequisites.length) correction.prerequisites = prerequisites;
             }
           } catch (preErr) {
             if (isSessionExpiredError(preErr)) throw preErr;
@@ -651,16 +664,56 @@ export class SapNotesApiClient {
   }
 
   /**
+   * Fetch every page from a CorrIns OData collection.
+   *
+   * The W7LegacyProxy returns an empty collection unless `$top` is present, so every request uses
+   * the paging shape sent by SAP for Me. Continue until the advertised count or a short page is
+   * reached instead of silently truncating notes or navigation collections above 100 rows.
+   */
+  private async fetchCorrInsCollection(
+    path: string,
+    token: string,
+    params: Record<string, string> = {}
+  ): Promise<any[]> {
+    const results: any[] = [];
+    let skip = 0;
+
+    while (true) {
+      const json: any = await this.fetchBackendJson(path, token, {
+        ...params,
+        $skip: String(skip),
+        $top: String(CORRINS_PAGE_SIZE),
+        $inlinecount: 'allpages'
+      });
+      const page = json?.d?.results;
+
+      if (!Array.isArray(page)) {
+        if (skip === 0 && json?.d && typeof json.d === 'object') return [json.d];
+        return results;
+      }
+
+      results.push(...page);
+      const rawCount = json?.d?.__count;
+      const parsedTotal = /^\d+$/.test(String(rawCount ?? '')) ? Number(rawCount) : undefined;
+      const total = Number.isSafeInteger(parsedTotal) ? parsedTotal : undefined;
+      if (page.length < CORRINS_PAGE_SIZE || (total !== undefined && results.length >= total)) {
+        return total !== undefined ? results.slice(0, total) : results;
+      }
+      if (total === undefined) {
+        throw new Error('CorrIns response omitted a valid __count for a full page');
+      }
+
+      skip += page.length;
+    }
+  }
+
+  /**
    * Fetch CorrInsSet entries for a note + software component from the OData service.
    */
   private async fetchCorrInsSet(paddedNoteId: string, pakId: string, token: string): Promise<any[]> {
-    const json: any = await this.fetchBackendJson(CORRINS_PATH, token, {
-      $skip: '0',
-      $top: '100',
-      $filter: `SapNotesNumber eq '${escapeODataString(paddedNoteId)}' and PakId eq '${escapeODataString(pakId)}'`,
-      $inlinecount: 'allpages'
+    return this.fetchCorrInsCollection(CORRINS_PATH, token, {
+      $filter: `SapNotesNumber eq '${escapeODataString(paddedNoteId)}' and PakId eq '${escapeODataString(pakId)}'`
     });
-    return Array.isArray(json?.d?.results) ? json.d.results : [];
   }
 
   /**
@@ -681,14 +734,10 @@ export class SapNotesApiClient {
       `VerTo='${escapeODataString(entry.VerTo)}'`,
     ].join(',');
 
-    const json: any = await this.fetchBackendJson(
+    return this.fetchCorrInsCollection(
       `${CORRINS_PATH}(${keyParts})/${navProperty}`,
-      token,
-      { $skip: '0', $top: '100', $inlinecount: 'allpages' }
+      token
     );
-    if (Array.isArray(json?.d?.results)) return json.d.results;
-    if (json?.d && typeof json.d === 'object') return [json.d];
-    return [];
   }
 
   /**
@@ -1687,6 +1736,18 @@ export class SapNotesApiClient {
     return undefined;
   }
 
+  /** Read a normalized HTTPS URL, rejecting non-web or malformed values. */
+  private httpsUrlField(item: any, ...names: string[]): string | undefined {
+    const value = this.stringField(item, ...names);
+    if (!value) return undefined;
+    try {
+      const url = new URL(value);
+      return url.protocol === 'https:' ? url.toString() : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Read a non-negative integer without accepting partially numeric strings. */
   private integerField(item: any, ...names: string[]): number | undefined {
     const value = this.itemField(item, ...names);
@@ -1701,7 +1762,7 @@ export class SapNotesApiClient {
   /** Map a reference-style item (References.RefTo/RefBy, Preconditions, SideEffects). */
   private mapReference(item: any): SapNoteReference {
     return {
-      noteNumber: this.stringField(item, 'RefNumber', 'SAPNoteNumber', 'Number') ?? '',
+      noteNumber: this.stringField(item, 'RefNumber', 'SAPNoteNumber', 'SapNotesNumber', 'Number') ?? '',
       title: this.stringField(item, 'RefTitle', 'Title') ?? '',
       noteType: this.stringField(item, 'RefComponent', 'Component', 'Type')
     };
