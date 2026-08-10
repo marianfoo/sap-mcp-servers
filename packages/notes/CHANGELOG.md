@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.6...sap-note-search-mcp-v0.3.7) (2026-08-10)
+
+
+### Bug Fixes
+
+* **notes:** add required CorrIns paging and TCI package URL ([#45](https://github.com/marianfoo/sap-mcp-servers/issues/45)) ([1a840e7](https://github.com/marianfoo/sap-mcp-servers/commit/1a840e7b37e7dbc2431d43ce0a728d3aec039dbd))
+
 ## [0.3.6](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.5...sap-note-search-mcp-v0.3.6) (2026-08-08)
 
 
