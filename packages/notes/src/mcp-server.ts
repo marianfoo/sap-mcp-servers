@@ -3,6 +3,10 @@ import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join, isAbsolute, resolve } from 'path';
 import { existsSync, realpathSync } from 'fs';
+import { writeFile } from 'fs/promises';
+import { createHash } from 'crypto';
+import { tmpdir } from 'os';
+import { basename } from 'path';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -17,7 +21,10 @@ import {
   NoteGetInputSchema,
   NoteGetOutputSchema,
   SAP_NOTE_SEARCH_DESCRIPTION,
-  SAP_NOTE_GET_DESCRIPTION
+  SAP_NOTE_GET_DESCRIPTION,
+  NoteAttachmentInputSchema,
+  NoteAttachmentOutputSchema,
+  SAP_NOTE_ATTACHMENT_DESCRIPTION
 } from './schemas/sap-notes.js';
 import { parseNoteContent } from './html-utils.js';
 
@@ -353,6 +360,70 @@ class SapNoteMcpServer {
             content: [{
               type: 'text',
               text: `Failed to retrieve SAP Note ${id}: ${errorMessage}`
+            }],
+            isError: true
+          };
+        }
+      }
+    );
+
+    this.mcpServer.registerTool(
+      'fetch_attachment',
+      {
+        title: 'Download SAP Note Attachment',
+        description: SAP_NOTE_ATTACHMENT_DESCRIPTION,
+        inputSchema: NoteAttachmentInputSchema,
+        outputSchema: NoteAttachmentOutputSchema
+      },
+      async ({ url, outputDir, filename }) => {
+        logger.info(`📎 [fetch_attachment] Downloading ${url}`);
+
+        try {
+          const { body, contentType, bytes, suggestedFilename } = await this.withAuthRetry(token =>
+            this.sapNotesClient.fetchAttachment(url, token)
+          );
+
+          // Name precedence: caller > server Content-Disposition > URL path.
+          // The URL path is frequently a generic endpoint name (for example
+          // "attachment.htm"), so preferring it would save a PDF as .htm.
+          const fromUrl = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'attachment');
+          const chosen = filename?.trim() || suggestedFilename?.trim() || fromUrl;
+          // Never let a supplied name escape the target directory.
+          const safeName = basename(chosen).replace(/[/\\]/g, '') || 'attachment';
+
+          const dir = outputDir?.trim() ? resolve(outputDir.trim()) : tmpdir();
+          if (!existsSync(dir)) {
+            throw new Error(`Output directory does not exist: ${dir}`);
+          }
+
+          const target = join(dir, safeName);
+          await writeFile(target, body);
+
+          const sha256 = createHash('sha256').update(body).digest('hex');
+          const output = { path: target, filename: safeName, contentType, bytes, sha256 };
+
+          logger.info(`✅ [fetch_attachment] Saved ${bytes} bytes to ${target}`);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Saved attachment to ${target}\n` +
+                    `  filename    : ${safeName}\n` +
+                    `  content type: ${contentType}\n` +
+                    `  size        : ${bytes.toLocaleString()} bytes\n` +
+                    `  sha256      : ${sha256}`
+            }],
+            structuredContent: output
+          };
+
+        } catch (error) {
+          logger.error(`❌ Attachment download failed for ${url}:`, error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown download error';
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Failed to download attachment: ${errorMessage}`
             }],
             isError: true
           };
