@@ -87,6 +87,7 @@ async function withAuthRetry<T>(fn: (cookieHeader: string) => Promise<T>): Promi
 - **Shared SSO** — after login the Playwright storage state is written to `ssoStorageStateFile`; other SAP MCP servers seed their browser context from it, so a single SAP login is reused across services. With `sharedSsoTokenFastPath: true` a valid storage-state file is reused **without launching a browser**.
 - **`validateSession` gate** — when provided, it runs on both cached reuse and fresh login; a rejected session is evicted and re-minted once.
 - **Cookie scoping** — `cookieScope` decides which cookies form the header: `{ type: 'url', url }` (origin-scoped), `{ type: 'domain', includes, fallbackToAll? }`, or `{ type: 'all' }`.
+- **Credential-origin guard** — password login fills credentials only on SAP's public identity origin or the configured standard customer-IAS tenant, and refuses to forward the password when federation changes the origin.
 
 ## API
 
@@ -155,6 +156,19 @@ const config = loadAuthConfigFromEnv({
 | `PLAYWRIGHT_BROWSER_TYPE` | `chromium` (default) \| `firefox` \| `webkit` |
 
 When loading configuration from a `.env` file, quote any value containing `#`; dotenv otherwise treats `#` and everything after it as a comment. For example, use `SAP_PASSWORD="My#Pass"`. The same applies to `PFX_PASSPHRASE`.
+
+### Customer IAS and corporate identity providers
+
+Direct password login supports the standard SAP Cloud Identity Services tenant domains
+`*.accounts.ondemand.com`, `*.accounts.cloud.sap`, and `*.accounts.sapcloud.cn`. The authenticator waits
+for the JavaScript redirect used by an unauthenticated tenant `/admin` entry page before detecting the
+credential form.
+
+If conditional authentication delegates the login to a corporate identity provider, the password flow
+fails closed before filling `SAP_PASSWORD` on the new origin. Corporate federation can require different
+credentials, MFA, passkeys, or organization-specific policies and must be completed through a separate
+interactive login flow. The authenticator never assumes that `SAP_PASSWORD` is valid for the delegated
+identity provider.
 
 ### Also exported
 
