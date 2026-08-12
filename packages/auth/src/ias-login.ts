@@ -63,15 +63,94 @@ const SUBMIT_SELECTORS = [
   'button[id*="submit" i]'
 ];
 
+const SAP_PUBLIC_IDENTITY_ORIGIN = 'https://accounts.sap.com';
+const STANDARD_CUSTOMER_IAS_SUFFIXES = [
+  '.accounts.ondemand.com',
+  '.accounts.cloud.sap',
+  '.accounts.sapcloud.cn'
+];
+const CUSTOMER_IAS_AUTH_PATH_PREFIXES = ['/saml2/', '/oauth2/', '/ui/', '/ids/'];
+const IAS_BOOTSTRAP_TIMEOUT_MS = 10000;
+
+function parseUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function isStandardCustomerIasHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return STANDARD_CUSTOMER_IAS_SUFFIXES.some(suffix => normalized.endsWith(suffix));
+}
+
+function isStandardCustomerIasAuthUrl(value: string): boolean {
+  const parsed = parseUrl(value);
+  if (!parsed || !isStandardCustomerIasHostname(parsed.hostname)) return false;
+  const path = parsed.pathname.toLowerCase();
+  return CUSTOMER_IAS_AUTH_PATH_PREFIXES.some(prefix => path.startsWith(prefix));
+}
+
+function isCustomerIasBootstrapPage(url: string, title: string): boolean {
+  const parsed = parseUrl(url);
+  if (!parsed || !isStandardCustomerIasHostname(parsed.hostname)) return false;
+  return parsed.pathname.toLowerCase().startsWith('/admin') &&
+    title.toLowerCase().includes('administration console');
+}
+
+function allowedCredentialOrigins(config: AuthConfig): Set<string> {
+  const origins = new Set([SAP_PUBLIC_IDENTITY_ORIGIN]);
+  const configuredLogin = config.sapLoginUrl ? parseUrl(config.sapLoginUrl) : undefined;
+  if (
+    configuredLogin?.protocol === 'https:' &&
+    isStandardCustomerIasHostname(configuredLogin.hostname)
+  ) {
+    origins.add(configuredLogin.origin);
+  }
+  return origins;
+}
+
+// Login selectors intentionally support several IAS page variants. Re-check the
+// top-level origin immediately before every fill so a redirect cannot rebind a
+// generic username/password selector to a delegated or lookalike identity site.
+function requireCredentialOrigin(
+  page: Page,
+  config: AuthConfig,
+  field: 'username' | 'password',
+  expectedOrigin?: string
+): string {
+  const parsed = parseUrl(page.url());
+  const origin = parsed?.origin;
+  const allowed = allowedCredentialOrigins(config);
+
+  if (!origin || !allowed.has(origin)) {
+    throw new AuthenticationError(
+      `Refusing to fill SAP ${field} on untrusted origin ${origin ?? 'unknown'}. ` +
+      `Allowed credential origins: ${[...allowed].join(', ')}. ` +
+      'The login may have been delegated to a corporate identity provider; complete that flow with a separate interactive login.'
+    );
+  }
+  if (expectedOrigin && origin !== expectedOrigin) {
+    throw new AuthenticationError(
+      `Refusing to fill SAP ${field} after the credential origin changed from ${expectedOrigin} to ${origin}. ` +
+      'The login may have been delegated to a corporate identity provider; complete that flow with a separate interactive login.'
+    );
+  }
+  return origin;
+}
+
 export function isOnAuthPage(url: string, title: string): boolean {
   const combined = `${url} ${title}`.toLowerCase();
   return (
+    isStandardCustomerIasAuthUrl(url) ||
     combined.includes('authentication') ||
     combined.includes('accounts.sap.com') ||
     combined.includes('login') ||
     combined.includes('oauth') ||
     combined.includes('saml') ||
     combined.includes('sign in') ||
+    combined.includes('log on') ||
     combined.includes('two-factor') ||
     combined.includes('verify') ||
     combined.includes('passcode')
@@ -81,6 +160,7 @@ export function isOnAuthPage(url: string, title: string): boolean {
 export function isAuthUrl(url: string): boolean {
   const value = url.toLowerCase();
   return (
+    isStandardCustomerIasAuthUrl(url) ||
     value.includes('authentication') ||
     value.includes('accounts.sap.com') ||
     value.includes('login') ||
@@ -106,6 +186,24 @@ async function openAuthPage(page: Page, url: string, label: string, logger: Logg
   await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {
     logger.warn(`${label} DOMContentLoaded wait timed out; continuing with login detection`);
   });
+
+  const committedUrl = page.url();
+  const committedTitle = await page.title();
+  if (isCustomerIasBootstrapPage(committedUrl, committedTitle)) {
+    logger.warn(`${label} reached the SAP Cloud Identity Services bootstrap page; waiting for its authentication redirect`);
+    const redirected = await page.waitForURL(
+      next => next.toString() !== committedUrl,
+      { timeout: IAS_BOOTSTRAP_TIMEOUT_MS, waitUntil: 'commit' }
+    ).then(() => true).catch(() => false);
+
+    if (redirected) {
+      await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {
+        logger.warn(`${label} authentication redirect did not finish loading; continuing with login detection`);
+      });
+    } else {
+      logger.warn(`${label} SAP Cloud Identity Services bootstrap did not redirect within ${IAS_BOOTSTRAP_TIMEOUT_MS / 1000}s`);
+    }
+  }
 }
 
 async function tryFillFirstVisible(
@@ -114,11 +212,13 @@ async function tryFillFirstVisible(
   value: string,
   label: string,
   timeout: number,
-  logger: Logger
+  logger: Logger,
+  beforeFill?: () => void
 ): Promise<boolean> {
   for (const selector of selectors) {
     const field = await page.waitForSelector(selector, { timeout, state: 'visible' }).catch(() => null);
     if (field) {
+      beforeFill?.();
       await field.click({ clickCount: 3 });
       await field.fill(value);
       logger.warn(`Filled ${label} field using selector ${selector}`);
@@ -133,9 +233,10 @@ async function fillFirstVisible(
   selectors: string[],
   value: string,
   label: string,
-  logger: Logger
+  logger: Logger,
+  beforeFill?: () => void
 ): Promise<void> {
-  const filled = await tryFillFirstVisible(page, selectors, value, label, 5000, logger);
+  const filled = await tryFillFirstVisible(page, selectors, value, label, 5000, logger, beforeFill);
   if (!filled) {
     await page.screenshot({ path: `debug-${label}-not-found.png`, fullPage: true }).catch(() => {});
     throw new AuthenticationError(`Could not find ${label} field on SAP login page`);
@@ -169,13 +270,33 @@ async function completePasswordLoginIfNeeded(
   }
 
   logger.warn(`Authentication page detected: ${pageTitle} at ${currentUrl}`);
-  await fillFirstVisible(page, USERNAME_SELECTORS, config.sapUsername!, 'username', logger);
+  let credentialOrigin = '';
+  await fillFirstVisible(page, USERNAME_SELECTORS, config.sapUsername!, 'username', logger, () => {
+    credentialOrigin = requireCredentialOrigin(page, config, 'username');
+  });
 
-  let passwordFilled = await tryFillFirstVisible(page, PASSWORD_SELECTORS, config.sapPassword!, 'password', 500, logger);
+  const guardPasswordFill = () => requireCredentialOrigin(page, config, 'password', credentialOrigin);
+  let passwordFilled = await tryFillFirstVisible(
+    page,
+    PASSWORD_SELECTORS,
+    config.sapPassword!,
+    'password',
+    500,
+    logger,
+    guardPasswordFill
+  );
   if (!passwordFilled) {
     logger.warn('Password field not visible yet; submitting username step');
     await clickFirstVisible(page, CONTINUE_SELECTORS, 'continue', logger);
-    passwordFilled = await tryFillFirstVisible(page, PASSWORD_SELECTORS, config.sapPassword!, 'password', 15000, logger);
+    passwordFilled = await tryFillFirstVisible(
+      page,
+      PASSWORD_SELECTORS,
+      config.sapPassword!,
+      'password',
+      15000,
+      logger,
+      guardPasswordFill
+    );
     if (!passwordFilled) {
       throw new AuthenticationError('Could not find password field after username submission');
     }
