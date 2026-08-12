@@ -379,13 +379,17 @@ class SapNoteMcpServer {
         logger.info(`📎 [fetch_attachment] Downloading ${url}`);
 
         try {
-          const { body, contentType, bytes } = await this.withAuthRetry(token =>
+          const { body, contentType, bytes, suggestedFilename } = await this.withAuthRetry(token =>
             this.sapNotesClient.fetchAttachment(url, token)
           );
 
-          // Never let a caller-supplied name escape the target directory.
-          const fallback = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'attachment');
-          const safeName = basename(filename?.trim() || fallback).replace(/[/\\]/g, '') || 'attachment';
+          // Name precedence: caller > server Content-Disposition > URL path.
+          // The URL path is frequently a generic endpoint name (for example
+          // "attachment.htm"), so preferring it would save a PDF as .htm.
+          const fromUrl = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'attachment');
+          const chosen = filename?.trim() || suggestedFilename?.trim() || fromUrl;
+          // Never let a supplied name escape the target directory.
+          const safeName = basename(chosen).replace(/[/\\]/g, '') || 'attachment';
 
           const dir = outputDir?.trim() ? resolve(outputDir.trim()) : tmpdir();
           if (!existsSync(dir)) {

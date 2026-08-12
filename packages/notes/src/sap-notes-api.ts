@@ -238,7 +238,7 @@ export class SapNotesApiClient {
   async fetchAttachment(
     attachmentUrl: string,
     token: string
-  ): Promise<{ body: Buffer; contentType: string; bytes: number }> {
+  ): Promise<{ body: Buffer; contentType: string; bytes: number; suggestedFilename?: string }> {
     let parsed: URL;
     try {
       parsed = new URL(attachmentUrl);
@@ -290,7 +290,13 @@ export class SapNotesApiClient {
         );
       }
 
-      return { body, contentType, bytes: body.length };
+      // SAP sends the real filename here; the URL path is often a generic
+      // endpoint name such as "attachment.htm", which would otherwise save a
+      // PDF under a .htm extension.
+      const disposition = response.headers()['content-disposition'];
+      const suggestedFilename = SapNotesApiClient.filenameFromDisposition(disposition);
+
+      return { body, contentType, bytes: body.length, suggestedFilename };
     } finally {
       await response.dispose().catch(() => {});
     }
@@ -305,6 +311,23 @@ export class SapNotesApiClient {
    * origins, which is what actually authenticates the document hosts; session
    * cookies are still supplied so cookie-authenticated hosts keep working.
    */
+  /** Extract a filename from a Content-Disposition header, if it carries one. */
+  private static filenameFromDisposition(disposition?: string): string | undefined {
+    if (!disposition) return undefined;
+
+    // RFC 5987 form takes precedence: filename*=UTF-8''name%20with%20spaces.pdf
+    const extended = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/i.exec(disposition);
+    if (extended?.[1]) {
+      try {
+        const decoded = decodeURIComponent(extended[1].trim());
+        if (decoded) return decoded;
+      } catch { /* fall through to the plain form */ }
+    }
+
+    const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(disposition);
+    return plain?.[1]?.trim() || undefined;
+  }
+
   private async ensureAttachmentRequestContext(token: string): Promise<APIRequestContext> {
     if (this.attachmentRequestContext) return this.attachmentRequestContext;
 
