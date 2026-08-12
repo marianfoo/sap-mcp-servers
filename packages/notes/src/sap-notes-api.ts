@@ -147,6 +147,7 @@ export class SapNotesApiClient {
   // native fetch, it can initialize directly from Playwright storage state and receives
   // backend JSON without retaining a browser process.
   private backendRequestContext: APIRequestContext | null = null;
+  private attachmentRequestContext: APIRequestContext | null = null;
   private backendRequestContextPromise: Promise<APIRequestContext> | null = null;
 
   constructor(config: ServerConfig) {
@@ -206,6 +207,142 @@ export class SapNotesApiClient {
     } finally {
       this.backendRequestContextPromise = null;
     }
+  }
+
+  /**
+   * Hosts permitted for attachment download. SAP serves Note attachments from
+   * its document hosts; anything else is rejected so that a caller cannot use
+   * this method as a generic fetcher against arbitrary URLs.
+   */
+  private static readonly ATTACHMENT_HOSTS = new Set([
+    'documents.support.sap.com',
+    'userapps.support.sap.com',
+    'launchpad.support.sap.com',
+    'support.sap.com',
+    'me.sap.com'
+  ]);
+
+  private static readonly MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+
+  /**
+   * Download a Note attachment.
+   *
+   * Attachment URLs come from SapNoteDetail.attachments — they are opaque and
+   * must not be constructed by hand.
+   *
+   * Note that an unauthenticated request to these URLs answers 200 with a small
+   * HTML "Please wait ..." login bootstrap rather than an error status, so the
+   * response is validated by content type as well as status; otherwise the stub
+   * would be written to disk under the attachment's filename.
+   */
+  async fetchAttachment(
+    attachmentUrl: string,
+    token: string
+  ): Promise<{ body: Buffer; contentType: string; bytes: number }> {
+    let parsed: URL;
+    try {
+      parsed = new URL(attachmentUrl);
+    } catch {
+      throw new Error(`Invalid attachment URL: ${attachmentUrl}`);
+    }
+
+    if (parsed.protocol !== 'https:') {
+      throw new Error(`Attachment URL must use https: ${parsed.protocol}//...`);
+    }
+    if (!SapNotesApiClient.ATTACHMENT_HOSTS.has(parsed.hostname)) {
+      throw new Error(
+        `Refusing to download from host "${parsed.hostname}". ` +
+        `Allowed hosts: ${[...SapNotesApiClient.ATTACHMENT_HOSTS].join(', ')}`
+      );
+    }
+
+    const context = await this.ensureAttachmentRequestContext(token);
+    const response = await context.get(parsed.toString(), { failOnStatusCode: false });
+
+    try {
+      const status = response.status();
+      const contentType = response.headers()['content-type'] ?? 'application/octet-stream';
+      const body = await response.body();
+
+      // The login bootstrap is small and HTML; check it before trusting the 200.
+      if (contentType.toLowerCase().includes('text/html')) {
+        const preview = body.subarray(0, 5000).toString('utf8');
+        if (isAuthenticationBootstrapResponse(status, contentType, preview)) {
+          await this.invalidateAttachmentRequestContext();
+          throw new Error(
+            `SESSION_EXPIRED: SAP returned a login page instead of the attachment (${attachmentUrl})`
+          );
+        }
+        throw new Error(
+          `SAP returned HTML rather than a file for ${attachmentUrl} — the attachment may have been removed.`
+        );
+      }
+
+      if (!response.ok()) {
+        throw new Error(`Attachment request failed (${status}) for ${attachmentUrl}`);
+      }
+      if (body.length === 0) {
+        throw new Error(`SAP returned an empty body for ${attachmentUrl}`);
+      }
+      if (body.length > SapNotesApiClient.MAX_ATTACHMENT_BYTES) {
+        throw new Error(
+          `Attachment is ${body.length} bytes, above the ${SapNotesApiClient.MAX_ATTACHMENT_BYTES}-byte limit.`
+        );
+      }
+
+      return { body, contentType, bytes: body.length };
+    } finally {
+      await response.dispose().catch(() => {});
+    }
+  }
+
+  /**
+   * Request context for attachment downloads.
+   *
+   * Attachments are served from support.sap.com hosts, not me.sap.com, so the
+   * me.sap.com-scoped storage state used for backend JSON is not sufficient on
+   * its own. Where a client certificate is configured it is presented for those
+   * origins, which is what actually authenticates the document hosts; session
+   * cookies are still supplied so cookie-authenticated hosts keep working.
+   */
+  private async ensureAttachmentRequestContext(token: string): Promise<APIRequestContext> {
+    if (this.attachmentRequestContext) return this.attachmentRequestContext;
+
+    const options: Parameters<typeof request.newContext>[0] = {
+      ignoreHTTPSErrors: true,
+      timeout: 60000
+    };
+
+    const storageState = await this.loadBackendStorageState(token).catch(() => null);
+    if (storageState) options.storageState = storageState;
+
+    const pfxPath = this.config.pfxPath;
+    if (pfxPath) {
+      try {
+        const { readFileSync, existsSync } = await import('fs');
+        if (existsSync(pfxPath)) {
+          const pfx = readFileSync(pfxPath);
+          options.clientCertificates = [...SapNotesApiClient.ATTACHMENT_HOSTS].map(host => ({
+            origin: `https://${host}`,
+            pfx,
+            passphrase: this.config.pfxPassphrase
+          }));
+        } else {
+          logger.debug(`Attachment client certificate not found at ${pfxPath}`);
+        }
+      } catch (e) {
+        logger.debug(`Attachment client certificate not applied: ${e}`);
+      }
+    }
+
+    this.attachmentRequestContext = await request.newContext(options);
+    return this.attachmentRequestContext;
+  }
+
+  private async invalidateAttachmentRequestContext(): Promise<void> {
+    const context = this.attachmentRequestContext;
+    this.attachmentRequestContext = null;
+    if (context) await context.dispose().catch(() => {});
   }
 
   private async invalidateBackendRequestContext(): Promise<void> {
