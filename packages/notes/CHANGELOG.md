@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.8](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.7...sap-note-search-mcp-v0.3.8) (2026-09-08)
+
+
+### Bug Fixes
+
+* **notes:** advertise JSON Schema 2020-12 ([#56](https://github.com/marianfoo/sap-mcp-servers/issues/56)) ([4ccdab8](https://github.com/marianfoo/sap-mcp-servers/commit/4ccdab86c807f7314b097b0ba566ebb9b13cbb17))
+
 ## [0.3.7](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.6...sap-note-search-mcp-v0.3.7) (2026-08-10)
 
 
