@@ -1,5 +1,17 @@
 import { z } from 'zod';
 
+const JSON_SCHEMA_2020_12 = 'https://json-schema.org/draft/2020-12/schema';
+
+/**
+ * MCP SDK 1.30 otherwise serializes Zod v4 tool schemas as draft-07.
+ * Root metadata overrides that dialect marker while preserving the Zod schema
+ * used for request and response validation. These tool schemas use keywords
+ * whose semantics are unchanged between draft-07 and 2020-12.
+ */
+function mcpObjectSchema<Shape extends z.ZodRawShape>(shape: Shape) {
+  return z.object(shape).meta({ $schema: JSON_SCHEMA_2020_12 });
+}
+
 /**
  * ============================================
  * SAP NOTE SCHEMAS
@@ -41,6 +53,8 @@ Avoid vague queries like "SAP problem" or "not working".`
       `Language for results. EN (default, broadest coverage) or DE (German).`
     ),
 };
+
+export const NoteSearchInputMcpSchema = mcpObjectSchema(NoteSearchInputSchema);
 
 /**
  * Output schema — single search result
@@ -87,6 +101,8 @@ export const NoteSearchOutputSchema = {
     .describe('Matching notes ranked by relevance. Fetch the top 2-3, not all.'),
 };
 
+export const NoteSearchOutputMcpSchema = mcpObjectSchema(NoteSearchOutputSchema);
+
 // ─── FETCH ─────────────────────────────────────────────────────────────────
 
 /**
@@ -113,6 +129,8 @@ export const NoteGetInputSchema = {
       `When true, fetches detailed correction instructions via an additional OData call (software components, ABAP objects modified, prerequisites per correction). This adds a few seconds. Use when the user asks about patches, SNOTE corrections, or which objects a note changes.`
     ),
 };
+
+export const NoteGetInputMcpSchema = mcpObjectSchema(NoteGetInputSchema);
 
 /**
  * Output schema for the "fetch" tool
@@ -288,6 +306,8 @@ export const NoteGetOutputSchema = {
     .optional()
     .describe('SNOTE download URL for automatic correction import.'),
 };
+
+export const NoteGetOutputMcpSchema = mcpObjectSchema(NoteGetOutputSchema);
 
 // ─── TOOL DESCRIPTIONS ─────────────────────────────────────────────────────
 
