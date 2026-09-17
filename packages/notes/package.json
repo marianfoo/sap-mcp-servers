@@ -26,6 +26,7 @@
     "start": "npm run build && npm run serve",
     "start:http": "npm run build && npm run serve:http",
     "start:http:debug": "npm run build && npm run serve:http:debug",
+    "mcp:inspect": "npx @modelcontextprotocol/inspector --transport http --server-url http://127.0.0.1:3123/mcp",
     "test:auth": "npm run build && node test/test-auth.js",
     "test:auth:debug": "npm run build && HEADFUL=true LOG_LEVEL=debug node test/test-auth.js",
     "test:docker:debug": "npm run build && node test/test-docker-debug.js",
@@ -59,6 +60,7 @@
     "url": "https://github.com/marianfoo/sap-mcp-servers/issues"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1134.0",
     "@marianfoo/sap-mcp-auth": "^0.1.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "cors": "^2.8.5",

@@ -1,5 +1,6 @@
 import type { ServerConfig } from './types.js';
 import { logger } from './logger.js';
+import { SapNoteS3Cache } from './note-s3-cache.js';
 import { existsSync } from 'fs';
 import {
   chromium,
@@ -142,6 +143,9 @@ export class SapNotesApiClient {
   // Coveo token cache (tokens are valid ~15-30 min)
   private coveoTokenCache: { token: string; expiresAt: number } | null = null;
   private readonly COVEO_TOKEN_TTL = 14 * 60 * 1000; // Cache for 14 minutes (conservative)
+
+  // S3-backed cache of previously fetched note details, keyed by note ID.
+  private readonly noteCache = new SapNoteS3Cache();
 
   // SAP for Me backend requests use Playwright's authenticated HTTP context. Unlike
   // native fetch, it can initialize directly from Playwright storage state and receives
@@ -486,6 +490,19 @@ export class SapNotesApiClient {
    * Get a specific SAP Note by ID
    */
   async getNote(noteId: string, token: string): Promise<SapNoteDetail | null> {
+    const cached = await this.noteCache.get(noteId);
+    if (cached) return cached;
+
+    const note = await this.fetchNoteFromSap(noteId, token);
+    if (note) await this.noteCache.set(noteId, note);
+    return note;
+  }
+
+  /**
+   * Runs the actual SAP fallback chain (backend OData, Playwright, raw HTTP,
+   * OData fallbacks) for a note that wasn't in the cache.
+   */
+  private async fetchNoteFromSap(noteId: string, token: string): Promise<SapNoteDetail | null> {
     logger.info(`📄 Fetching SAP Note: ${noteId}`);
 
     try {
