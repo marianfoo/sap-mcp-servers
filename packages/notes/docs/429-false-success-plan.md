@@ -2,27 +2,24 @@
 
 ## Problem
 
-`getNote` catches backend and fallback HTTP errors, then tries another source.
-The final HTML fallback turns any response body into a plausible SAP Note with
-placeholder content. Generic JSON and browser fallback branches also have
-placeholder content paths. A rate-limited request can therefore look successful.
-Callers may treat missing support-package data as a real result.
+`getNote` used to continue after HTTP 429 and could turn an HTML error page into
+a note with placeholder content. A legacy launchpad login page could also be
+mistaken for an expired SAP for Me session. The auth retry checked for `401`
+anywhere in an error, including inside a note number.
 
 ## Fix
 
-1. Reproduce the failure with a deterministic test: backend HTTP 429 followed
-   by an HTML fallback must never produce a note.
-2. Stop on HTTP 429 and report a retryable error. More immediate requests to
-   the same service would extend the rate limit.
-3. Do not turn generic HTML or content-free JSON into a note. Keep the existing
-   authenticated Detail path and fallbacks that contain actual note text.
+1. Stop fetch and search fallbacks on HTTP 429 and return the rate-limit error.
+2. Accept fallback JSON only when it has note text. Treat generic HTML as no note.
+3. Detect session expiry on SAP for Me endpoints, not on the legacy launchpad.
+4. Retry authentication for a standalone 401 or session-expired error.
 
 ## Verification
 
-- First run the regression test against the old behavior to confirm it fails.
-- Test HTTP 429, unrelated HTML, content-free JSON, and a valid Detail response.
-- Build and run the Notes unit suite locally and in PR CI. Check that the MCP
-  `fetch` handler returns an error when `getNote` throws.
+- Confirm the SAML, `401`-in-note-ID, and generic HTML tests fail before the fix.
+- Build, typecheck, and run the offline Notes tests locally and in PR CI.
+- Check that a real Detail response still succeeds and the MCP fetch tool
+  returns an error for HTTP 429.
 
 No live SAP rate-limit burst is needed for this regression: the test controls
 the exact HTTP responses without stressing a production endpoint.

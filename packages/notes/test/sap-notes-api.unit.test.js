@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SapNotesApiClient } from '../dist/sap-notes-api.js';
+import { SapNoteMcpServer } from '../dist/mcp-server.js';
+import { HttpSapNoteMcpServer } from '../dist/http-mcp-server.js';
 import { NoteGetOutputSchema } from '../dist/schemas/sap-notes.js';
 
 function createClient() {
@@ -31,15 +33,29 @@ test('a backend rate limit never becomes a successful placeholder note', async (
   assert.equal(fallbackCalls, 0, 'do not amplify a rate limit with more requests');
 });
 
-test('an unrelated HTML fallback is not a SAP Note', async () => {
+test('a search rate limit does not start Coveo fallback requests', async () => {
+  const client = createClient();
+  let fallbackCalls = 0;
+  client.fetchBackendJson = async () => {
+    throw new Error('SAP backend request failed (429) for search');
+  };
+  client.getCoveoToken = async () => { fallbackCalls++; throw new Error('Unexpected Coveo request'); };
+  client.searchViaInternalAPI = async () => { fallbackCalls++; return []; };
+
+  await assert.rejects(client.searchNotes('test', 'token'), /429/);
+  assert.equal(fallbackCalls, 0);
+});
+
+test('the launchpad SAML page is neither a note nor a session expiry', async () => {
   const client = createClient();
   client.fetchBackendJson = async () => { throw new Error('Backend unavailable'); };
   client.getNoteWithPlaywright = async () => null;
   client.makeRawRequest = async () => new Response('Not found', { status: 404 });
-  client.makeRequest = async () => new Response('<html><title>Service unavailable</title></html>', {
-    status: 200,
-    headers: { 'content-type': 'text/html' }
-  });
+  client.makeRequest = async () => new Response(
+    '<html><body onload="document.cookie=\'a=b\';document.forms[0].submit()">' +
+      '<form method="post" action="https://authn.hana.ondemand.com/saml2/sp/mds"></form></body></html>',
+    { status: 200, headers: { 'content-type': 'text/html;charset=utf-8' } }
+  );
 
   assert.equal(await client.getNote('3772838', 'token'), null);
 });
@@ -56,17 +72,49 @@ test('a rate limit from the raw endpoint also stops fallback requests', async ()
   assert.equal(fallbackCalls, 0);
 });
 
-test('a login HTML fallback requests session renewal', async () => {
-  const client = createClient();
-  client.fetchBackendJson = async () => { throw new Error('Backend unavailable'); };
-  client.getNoteWithPlaywright = async () => null;
-  client.makeRawRequest = async () => new Response('Not found', { status: 404 });
-  client.makeRequest = async () => new Response('<html>accounts.sap.com login</html>', {
-    status: 200,
-    headers: { 'content-type': 'text/html' }
-  });
+test('a rate limit never forces a re-login for a note number containing 401', async () => {
+  for (const Server of [SapNoteMcpServer, HttpSapNoteMcpServer]) {
+    const client = createClient();
+    let calls = 0;
+    client.fetchBackendJson = async () => {
+      calls++;
+      throw new Error('SAP backend request failed (429) for /backend/raw/sapnotes/Detail');
+    };
+    let invalidations = 0;
+    const server = {
+      authenticator: {
+        ensureSession: async () => ({ cookieHeader: 'token' }),
+        invalidateAuth: () => { invalidations++; }
+      }
+    };
 
-  await assert.rejects(client.getNote('3772838', 'token'), /SESSION_EXPIRED/);
+    await assert.rejects(
+      Server.prototype.withAuthRetry.call(server, token => client.getNote('3401234', token)),
+      /HTTP 429/
+    );
+    assert.equal(invalidations, 0, Server.name);
+    assert.equal(calls, 1, Server.name);
+  }
+});
+
+test('an actual HTTP 401 still renews the session once', async () => {
+  for (const Server of [SapNoteMcpServer, HttpSapNoteMcpServer]) {
+    let sessions = 0;
+    let invalidations = 0;
+    const server = {
+      authenticator: {
+        ensureSession: async () => ({ cookieHeader: `token-${++sessions}` }),
+        invalidateAuth: () => { invalidations++; }
+      }
+    };
+    const result = await Server.prototype.withAuthRetry.call(server, async token => {
+      if (token === 'token-1') throw new Error('HTTP 401: Unauthorized');
+      return token;
+    });
+
+    assert.equal(result, 'token-2', Server.name);
+    assert.equal(invalidations, 1, Server.name);
+  }
 });
 
 test('raw and OData JSON without note text do not become successful notes', async () => {
@@ -105,6 +153,25 @@ test('browser JSON with an ID but no note text is ignored', async () => {
     title: async () => 'SAP Note',
     url: () => 'https://me.sap.com/backend/raw/sapnotes/Detail',
     locator: () => ({ textContent: async () => '{"id":"3772838"}' }),
+    close: async () => {}
+  };
+  client.ensurePersistentBrowser = async () => {};
+  client.browserContext = { newPage: async () => page };
+  client.savePersistentStorageState = async () => {};
+
+  assert.equal(await client.getNoteWithPlaywright('3772838', 'token'), null);
+});
+
+test('browser HTML with a generic content element is not a SAP Note', async () => {
+  const client = createClient();
+  const page = {
+    goto: async () => ({ ok: () => true, status: () => 200 }),
+    waitForTimeout: async () => {},
+    content: async () => '<html><body><div class="content">Service temporarily unavailable</div></body></html>',
+    title: async () => 'Service page',
+    url: () => 'https://me.sap.com/backend/raw/sapnotes/Detail',
+    locator: () => ({ textContent: async () => 'Service temporarily unavailable' }),
+    evaluate: async () => ({ id: '3772838', title: '', summary: '', content: 'Service temporarily unavailable', found: true }),
     close: async () => {}
   };
   client.ensurePersistentBrowser = async () => {};

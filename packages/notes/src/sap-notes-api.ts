@@ -341,7 +341,7 @@ export class SapNotesApiClient {
         return await this.searchViaBackend(query, token, maxResults);
       } catch (backendError) {
         const message = backendError instanceof Error ? backendError.message : String(backendError);
-        if (message.includes('SESSION_EXPIRED')) throw backendError;
+        if (isSessionExpiredError(backendError) || isRateLimitError(backendError)) throw backendError;
         logger.warn(`⚠️ SAP for Me backend search failed, falling back to Coveo: ${message}`);
       }
 
@@ -1573,14 +1573,6 @@ export class SapNotesApiClient {
    */
   private async parseNoteResponse(response: Response, noteId: string): Promise<SapNoteDetail | null> {
     const responseText = await response.text();
-
-    if (isAuthenticationBootstrapResponse(
-      response.status,
-      response.headers.get('content-type') ?? undefined,
-      responseText
-    )) {
-      throw new Error('SESSION_EXPIRED: fallback endpoint returned the SAP login bootstrap');
-    }
     
     // Try JSON first
     try {
@@ -2337,64 +2329,7 @@ export class SapNotesApiClient {
         logger.debug('No JSON found in HTML body either');
       }
 
-      // If no JSON, try to extract data from HTML
-      logger.debug(`📄 Parsing HTML content (${content.length} characters)`);
-      
-      // Look for note data in various places in the HTML
-      const noteData = await page.evaluate((noteId) => {
-        // Try to find note information in the page
-        const result = {
-          id: noteId,
-          title: '',
-          summary: '',
-          content: '',
-          found: false
-        };
-
-        // Look for title in various places
-        const titleElement = document.querySelector('h1, h2, .note-title, .title');
-        if (titleElement) {
-          result.title = titleElement.textContent?.trim() || '';
-          result.found = true;
-        }
-
-        // Look for content in various places
-        const contentElement = document.querySelector('.note-content, .content, .description, .text');
-        if (contentElement) {
-          result.content = contentElement.textContent?.trim() || '';
-          result.found = true;
-        }
-
-        // Look for summary
-        const summaryElement = document.querySelector('.summary, .abstract, .description');
-        if (summaryElement) {
-          result.summary = summaryElement.textContent?.trim() || '';
-          result.found = true;
-        }
-
-        // If we found any content, mark as successful
-        if (result.title || result.content || result.summary) {
-          result.found = true;
-        }
-
-        return result;
-      }, noteId);
-
-      if (noteData.content.trim()) {
-        logger.info(`📄 Extracted note data from HTML via Playwright`);
-        
-        return {
-          id: noteId,
-          title: noteData.title || `SAP Note ${noteId}`,
-          summary: noteData.summary || 'Extracted via Playwright',
-          content: noteData.content,
-          language: 'EN',
-          releaseDate: 'Unknown',
-          url: `https://launchpad.support.sap.com/#/notes/${noteId}`
-        };
-      }
-
-      // If we get here, we didn't find useful content
+      // The Detail endpoint answers JSON; an HTML page is not note content.
       logger.warn(`⚠️ Playwright loaded page but couldn't extract note content`);
       return null;
 
