@@ -21,8 +21,8 @@ Callers may treat missing support-package data as a real result.
 
 - First run the regression test against the old behavior to confirm it fails.
 - Test HTTP 429, unrelated HTML, content-free JSON, and a valid Detail response.
-- Build and run the Notes unit suite. Check that the MCP `fetch` handler returns
-  an error when `getNote` throws.
+- Build and run the Notes unit suite locally and in PR CI. Check that the MCP
+  `fetch` handler returns an error when `getNote` throws.
 
 No live SAP rate-limit burst is needed for this regression: the test controls
 the exact HTTP responses without stressing a production endpoint.
