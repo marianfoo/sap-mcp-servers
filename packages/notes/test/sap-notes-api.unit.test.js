@@ -48,7 +48,9 @@ test('a search rate limit does not start Coveo fallback requests', async () => {
 
 test('the launchpad SAML page is neither a note nor a session expiry', async () => {
   const client = createClient();
-  client.fetchBackendJson = async () => { throw new Error('Backend unavailable'); };
+  client.fetchBackendJson = async () => ({
+    Response: { Error: { Code: 'DOES_NOT_EXIST', Message: 'Note not found' } }
+  });
   client.getNoteWithPlaywright = async () => null;
   client.makeRawRequest = async () => new Response('Not found', { status: 404 });
   client.makeRequest = async () => new Response(
