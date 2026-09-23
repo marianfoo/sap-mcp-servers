@@ -228,6 +228,9 @@ Retrieve full content and enriched metadata for a specific SAP Note.
 - Attachments and SNOTE download URL
 - *(with `includeCorrections=true`)* Detailed correction entries with affected ABAP objects (TADIR) and per-correction prerequisites
 
+If SAP responds with HTTP 429, `fetch` returns an error; pause before retrying.
+Generic HTML and fallback JSON without note text are not returned as successful notes.
+
 **Examples:**
 ```
 Get the full content of SAP Note 2744792

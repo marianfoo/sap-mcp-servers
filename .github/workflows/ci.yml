@@ -37,6 +37,9 @@ jobs:
       - name: Build (auth → servers)
         run: npm run build
 
+      - name: Test SAP Notes without live SAP
+        run: node --test packages/notes/test/*.unit.test.js
+
       - name: Smoke test published MCP bins
         run: npm run smoke:bin
 

@@ -215,7 +215,7 @@ class HttpSapNoteMcpServer {
       return await fn(cookieHeader);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes('SESSION_EXPIRED') || msg.includes('401') || msg.includes('Unauthorized') || msg.includes('session expired')) {
+      if (msg.includes('SESSION_EXPIRED') || /\b401\b/.test(msg) || msg.includes('Unauthorized') || msg.includes('session expired')) {
         logger.warn('Session expired, re-authenticating and retrying...');
         this.authenticator.invalidateAuth();
         const { cookieHeader: newCookie } = await this.authenticator.ensureSession();
