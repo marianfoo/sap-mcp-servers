@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.9](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.8...sap-note-search-mcp-v0.3.9) (2026-09-23)
+
+
+### Bug Fixes
+
+* **notes:** reject rate limits and content-free fallbacks ([#67](https://github.com/marianfoo/sap-mcp-servers/issues/67)) ([407ef6c](https://github.com/marianfoo/sap-mcp-servers/commit/407ef6cf686c205cb54dc9da275e6b7afbd61a9a))
+
 ## [0.3.8](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.7...sap-note-search-mcp-v0.3.8) (2026-09-08)
 
 
