@@ -1,6 +1,6 @@
 {
   "name": "@marianfoo/sap-mcp-auth",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Shared SAP IAS browser login and session module for SAP MCP servers (Playwright-based).",
   "type": "module",
   "main": "dist/index.js",
