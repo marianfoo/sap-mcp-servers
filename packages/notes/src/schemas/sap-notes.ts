@@ -334,6 +334,60 @@ USE AFTER search() returns relevant note IDs. Fetch only the top 2-3 results, no
 
 PARAMETER: id — alphanumeric Note ID only (e.g. "2744792"). Strip any "Note" or "SAP Note" prefix.`;
 
+// ─── FETCH ATTACHMENT ──────────────────────────────────────────────────────
+
+/**
+ * Input schema for the "fetch_attachment" tool
+ */
+export const NoteAttachmentInputSchema = {
+  url: z
+    .string()
+    .url()
+    .describe(
+      `Attachment URL exactly as returned in the "attachments" array of fetch(). Must be an SAP document host (e.g. https://documents.support.sap.com/customerkba/...). Do not construct or guess these URLs — take them from fetch() output.`
+    ),
+
+  outputDir: z
+    .string()
+    .optional()
+    .describe(
+      `Local directory to write the file into. It must already exist. By default, creates a private directory under the OS temp directory. Existing files are never overwritten.`
+    ),
+
+  filename: z
+    .string()
+    .optional()
+    .describe(
+      `Filename to save as. Defaults to the server's Content-Disposition filename, then the URL basename. Directory components are removed. Existing files are never overwritten.`
+    )
+};
+
+/**
+ * Output schema for the "fetch_attachment" tool
+ */
+export const NoteAttachmentOutputSchema = {
+  path: z.string().describe('Absolute path of the saved file.'),
+
+  filename: z.string().describe('Filename the attachment was saved as.'),
+
+  contentType: z.string().describe('Content-Type reported by SAP (e.g. "image/png", "application/pdf").'),
+
+  bytes: z.number().int().nonnegative().describe('Size of the saved file in bytes.'),
+
+  sha256: z.string().describe('SHA-256 of the saved bytes, for integrity checking and de-duplication.')
+};
+
+export const NoteAttachmentInputMcpSchema = mcpObjectSchema(NoteAttachmentInputSchema);
+export const NoteAttachmentOutputMcpSchema = mcpObjectSchema(NoteAttachmentOutputSchema);
+
+export const SAP_NOTE_ATTACHMENT_DESCRIPTION = `Download a file attached to an SAP Note and save it to the local filesystem (stdio only).
+
+USE AFTER fetch() returns an "attachments" array — pass one of those URLs verbatim. Attachments are the screenshots, PDFs, spreadsheets and archives referenced by a Note's text; the Note body often points at them with placeholders such as [image.png].
+
+Returns the saved path, content type, byte size and SHA-256. Only SAP document hosts are accepted, including redirects. Existing files are never overwritten. Downloads are limited to 100 MiB and 60 seconds.
+
+NOTE: an unauthenticated or expired session returns HTTP 200 with a small HTML login stub rather than an error. This tool detects that and fails instead of silently saving the stub — so a successful result means real file bytes.`;
+
 // ─── TYPE EXPORTS ──────────────────────────────────────────────────────────
 
 export type NoteSearchInput = z.infer<z.ZodObject<typeof NoteSearchInputSchema>>;
@@ -341,3 +395,5 @@ export type NoteSearchOutput = z.infer<z.ZodObject<typeof NoteSearchOutputSchema
 export type NoteSearchResult = z.infer<z.ZodObject<typeof NoteSearchResultSchema>>;
 export type NoteGetInput = z.infer<z.ZodObject<typeof NoteGetInputSchema>>;
 export type NoteGetOutput = z.infer<z.ZodObject<typeof NoteGetOutputSchema>>;
+export type NoteAttachmentInput = z.infer<z.ZodObject<typeof NoteAttachmentInputSchema>>;
+export type NoteAttachmentOutput = z.infer<z.ZodObject<typeof NoteAttachmentOutputSchema>>;

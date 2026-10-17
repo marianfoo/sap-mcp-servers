@@ -71,6 +71,16 @@ class FakeLoginPage {
   }
 
   async waitForSelector(selector: string): Promise<FakeElement | null> {
+    const alternatives = selector.split(',').map(value => value.trim().replace(/:visible$/, ''));
+    for (const alternative of alternatives) {
+      const element = await this.$(alternative);
+      if (element) return element;
+    }
+    return null;
+  }
+
+  async $(selector: string): Promise<FakeElement | null> {
+    selector = selector.replace(/:visible$/, '');
     if (this.stage === 'username' && selector === '#j_username') {
       return new FakeElement(this, 'username');
     }
@@ -115,6 +125,9 @@ class FakeElement {
     private readonly page: FakeLoginPage,
     private readonly kind: 'username' | 'password' | 'button'
   ) {}
+
+  async isVisible(): Promise<boolean> { return true; }
+  async dispose(): Promise<void> {}
 
   async click(): Promise<void> {
     if (this.kind === 'button') this.page.advance();
