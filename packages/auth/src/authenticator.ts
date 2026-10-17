@@ -207,7 +207,7 @@ export class SapWebAuthenticator {
           this.applyState(cached);
           return;
         }
-        this.log.warn(`Cached ${this.profile.serviceName} cookies were rejected; forcing fresh authentication`);
+        this.log.warn(`Cached ${this.profile.serviceName} cookies failed validation; forcing fresh authentication`);
         removeCachedToken(this.config.tokenCacheFile, this.log);
       } else {
         this.log.warn(`Using cached ${this.profile.serviceName} cookies`);
@@ -224,7 +224,7 @@ export class SapWebAuthenticator {
         saveCachedToken(this.config.tokenCacheFile, sso, this.log);
         return;
       }
-      if (sso) this.log.warn(`Shared SAP SSO cookies were rejected by ${this.profile.serviceName}; forcing fresh authentication`);
+      if (sso) this.log.warn(`Shared SAP SSO cookies failed ${this.profile.serviceName} validation; forcing fresh authentication`);
     } else if (this.skipSharedSsoOnce) {
       this.log.warn('Skipping shared SAP SSO browser state for this authentication retry');
       this.skipSharedSsoOnce = false;

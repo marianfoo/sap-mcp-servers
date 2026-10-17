@@ -63,7 +63,11 @@ test('validation preserves cookie domain and path scope with the real request cl
   assert.equal(sentCookies, 'session=service');
 });
 
-test('malformed cookie metadata is rejected before any network request', async () => {
+test('malformed cookie metadata is rejected before any network request', async t => {
+  const newContext = request.newContext.bind(request);
+  t.mock.method(request, 'newContext', async options => Object.assign(await newContext(options), {
+    get: () => assert.fail('Malformed cookies must not cause a network request')
+  }));
   assert.equal(await validateNotesSession('session=partial', [{ name: 'session', value: 'partial' }]), false);
 });
 
