@@ -47,6 +47,10 @@ jobs:
       - name: Test shared SSO configuration across packages
         run: node --test test/shared-sso-paths.test.mjs
 
+      - name: Test release publication without npm access
+        if: runner.os == 'Linux'
+        run: node --test test/release-publish.test.mjs
+
       - name: Test SAP Notes without live SAP
         run: node --test packages/notes/test/*.unit.test.js
 

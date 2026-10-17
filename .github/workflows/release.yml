@@ -66,33 +66,46 @@ jobs:
         run: |
           set -euo pipefail
           echo "release-please released: $PATHS_RELEASED"
+          is_published() {
+            [[ "$(npm view "$1@$2" version --prefer-online --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=5000 2>/dev/null)" == "$2" ]]
+          }
+          wait_for_package() {
+            # npm accepting a publish does not mean the version is installable yet.
+            # Allow roughly 15 minutes of polling, plus bounded registry requests.
+            for attempt in {1..180}; do
+              if is_published "$1" "$2"; then
+                echo "$1@$2 is available on npm."
+                return 0
+              fi
+              if (( attempt % 12 == 1 )); then
+                echo "Waiting for $1@$2 on npm (check $attempt/180)..."
+              fi
+              if (( attempt < 180 )); then sleep 5; fi
+            done
+            echo "::error::$1@$2 is not yet available on npm. Re-run failed jobs once it is available; available versions will be skipped." >&2
+            npm view "$1@$2" version --prefer-online --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=5000 >&2 || true
+            return 1
+          }
           auth_version=$(node -p 'require("./packages/auth/package.json").version')
           auth_ready=false
           # Servers must never be published before their auth dependency is installable.
           for path in $(jq -r 'sort_by(. != "packages/auth") | .[]' <<< "$PATHS_RELEASED"); do
             name=$(node -p "require('./$path/package.json').name")
             version=$(node -p "require('./$path/package.json').version")
-            if [[ "$(npm view "$name@$version" version --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=5000 2>/dev/null)" == "$version" ]]; then
+            if is_published "$name" "$version"; then
               echo "$name@$version is already on npm; skipping."
               continue
             fi
             if [[ "$path" != "packages/auth" && "$auth_ready" != true ]]; then
-              # npm may process a newly published version for several minutes.
-              for attempt in {1..60}; do
-                if [[ "$(npm view "@marianfoo/sap-mcp-auth@$auth_version" version --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=5000 2>/dev/null)" == "$auth_version" ]]; then
-                  auth_ready=true
-                  break
-                fi
-                sleep 5
-              done
-              if [[ "$auth_ready" != true ]]; then
-                echo "Auth $auth_version is not available on npm; stopping before server publication." >&2
-                exit 1
-              fi
+              wait_for_package '@marianfoo/sap-mcp-auth' "$auth_version"
+              auth_ready=true
             fi
             echo "::group::npm publish $path"
             npm publish --workspace "$path" --provenance --access public
             echo "::endgroup::"
+            # Keep consumers and the dependent desktop bundle behind registry visibility.
+            wait_for_package "$name" "$version"
+            if [[ "$path" == "packages/auth" ]]; then auth_ready=true; fi
           done
 
   # SAP Notes is distributed as a tiny reference bundle: the MCPB contains only

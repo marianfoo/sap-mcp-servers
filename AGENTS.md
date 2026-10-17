@@ -160,6 +160,13 @@ Fully automated, per package:
 
 You never run `npm version` / `npm publish` by hand — review and merge the release PR.
 
+If npm accepts a publish but the new version is still processing, the workflow polls for its
+availability before continuing. This can take several minutes. If it times out, verify the exact
+version with `npm view <package>@<version> version --prefer-online`, then **re-run failed jobs** on
+the original release run (`gh run rerun <run-id> --failed`). Already available versions are skipped.
+Keep the existing tags and versions; a full rerun of release-please may no longer report the
+original releases. Confirm the server packages and the Notes MCPB assets after recovery.
+
 ### One-time setup: npm OIDC trusted publishing
 
 `publish-npm` uses **OIDC trusted publishing** (no `NPM_TOKEN` secret). For each of the four packages,
