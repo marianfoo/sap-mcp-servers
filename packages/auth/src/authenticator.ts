@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'fs';
+import { resolve as resolvePath } from 'path';
 import {
   chromium,
   firefox,
@@ -14,7 +15,7 @@ import type { AuthConfig, AuthSession, CachedToken, Logger, ResolvedAuthMethod, 
 import { AuthenticationError, BrowserNotFoundError, CertificateLoadError } from './errors.js';
 import { defaultLogger } from './logger.js';
 import { loadCachedToken, removeCachedToken, saveCachedToken } from './cookie-cache.js';
-import { loadSharedSsoToken, saveSharedSsoStorageState } from './sso-storage-state.js';
+import { loadSharedSsoStorageState, loadSharedSsoToken, saveSharedSsoStorageState } from './sso-storage-state.js';
 import { selectCookies, serializeCookies } from './cookie-scope.js';
 import { performCertificateNavigation, performInteractiveLogin, performPasswordLogin } from './ias-login.js';
 
@@ -40,6 +41,10 @@ export class SapWebAuthenticator {
 
   constructor(private readonly config: AuthConfig, private readonly profile: ServiceProfile) {
     this.log = config.logger ?? defaultLogger;
+    if (config.tokenCacheFile) this.log.warn(`${profile.serviceName} token cache: ${resolvePath(config.tokenCacheFile)}`);
+    if (config.ssoStorageStateFile) {
+      this.log.warn(`Shared SAP SSO state: ${resolvePath(config.ssoStorageStateFile)}`);
+    }
   }
 
   /**
@@ -197,12 +202,12 @@ export class SapWebAuthenticator {
     if (cached && Date.now() < cached.expiresAt - EXPIRY_BUFFER_MS) {
       if (this.profile.validateSession) {
         this.log.warn(`Validating cached ${this.profile.serviceName} cookies`);
-        if (await this.profile.validateSession(cached.access_token)) {
+        if (await this.profile.validateSession(cached.access_token, cached.cookies)) {
           this.log.warn(`Using cached ${this.profile.serviceName} cookies`);
           this.applyState(cached);
           return;
         }
-        this.log.warn(`Cached ${this.profile.serviceName} cookies were rejected; forcing fresh authentication`);
+        this.log.warn(`Cached ${this.profile.serviceName} cookies failed validation; forcing fresh authentication`);
         removeCachedToken(this.config.tokenCacheFile, this.log);
       } else {
         this.log.warn(`Using cached ${this.profile.serviceName} cookies`);
@@ -213,12 +218,13 @@ export class SapWebAuthenticator {
 
     if (this.config.sharedSsoTokenFastPath && !this.skipSharedSsoOnce) {
       const sso = loadSharedSsoToken(this.config.ssoStorageStateFile, this.config.maxSessionAgeH, this.log);
-      if (sso) {
+      if (sso && (!this.profile.validateSession || await this.profile.validateSession(sso.access_token, sso.cookies))) {
         this.log.warn('Using shared SAP SSO browser state');
         this.applyState(sso);
         saveCachedToken(this.config.tokenCacheFile, sso, this.log);
         return;
       }
+      if (sso) this.log.warn(`Shared SAP SSO cookies failed ${this.profile.serviceName} validation; forcing fresh authentication`);
     } else if (this.skipSharedSsoOnce) {
       this.log.warn('Skipping shared SAP SSO browser state for this authentication retry');
       this.skipSharedSsoOnce = false;
@@ -240,15 +246,25 @@ export class SapWebAuthenticator {
       if (this.profile.userAgent) {
         contextOptions.userAgent = this.profile.userAgent;
       }
-      if (this.config.ssoStorageStateFile && existsSync(this.config.ssoStorageStateFile)) {
-        contextOptions.storageState = this.config.ssoStorageStateFile;
+      const sharedState = loadSharedSsoStorageState(this.config.ssoStorageStateFile, this.log);
+      if (sharedState) {
+        contextOptions.storageState = sharedState;
         this.log.warn(`Loading shared SAP SSO browser state from ${this.config.ssoStorageStateFile}`);
       }
       if (authMethod === 'certificate') {
         contextOptions.clientCertificates = [this.prepareClientCertificate()];
       }
 
-      this.context = await this.browser.newContext(contextOptions);
+      try {
+        this.context = await this.browser.newContext(contextOptions);
+      } catch (error) {
+        if (!sharedState) throw error;
+        // Playwright validates cookie/origin fields. If it cannot restore them,
+        // retry with an empty context; never delete another server's shared file.
+        this.log.warn('Could not restore shared SAP SSO state; starting a fresh browser login');
+        delete contextOptions.storageState;
+        this.context = await this.browser.newContext(contextOptions);
+      }
       this.page = await this.context.newPage();
       this.page.on('dialog', dialog => {
         this.log.warn(`Dialog appeared: ${dialog.type()} ${dialog.message()}`);
@@ -278,11 +294,11 @@ export class SapWebAuthenticator {
         );
       }
 
-      if (this.profile.validateSession && !(await this.profile.validateSession(cookieHeader))) {
+      if (this.profile.validateSession && !(await this.profile.validateSession(cookieHeader, scoped))) {
         throw new AuthenticationError(
           `${this.profile.serviceName} login produced cookies, but the service still rejected the session. ` +
-          'Headless username/password login likely requires MFA or another interactive step. ' +
-          'Run once with HEADFUL=true for manual completion, or configure SAP Passport auth with PFX_PATH and PFX_PASSPHRASE.'
+          'Verify access to the service and complete SAP sign-in with HEADFUL=true, ' +
+          'or configure SAP Passport auth with PFX_PATH and PFX_PASSPHRASE.'
         );
       }
 

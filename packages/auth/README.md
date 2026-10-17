@@ -180,6 +180,26 @@ identity provider.
 
 The `tokenCacheFile` and the SSO `storageStateFile` contain **live SAP session cookies**. Treat them as secrets: store them outside your repo (e.g. `~/.sap-mcp/`), never commit them, and add them to `.gitignore`. Credentials and passphrases are never written to these files, but the cookies they hold can be used to act as you on SAP services until they expire.
 
+### Finding and recovering cached sessions
+
+**For MCP clients, set the shared-state path and each service's token-cache path to explicit absolute
+paths outside `node_modules`.** The resolved paths are logged at startup, without cookie contents.
+
+| State | Override | Default when unset |
+| --- | --- | --- |
+| Shared SSO | `SAP_SSO_STORAGE_STATE` | `~/.sap-mcp/sso-storage-state.json` in the user's home |
+| API Hub | `API_HUB_TOKEN_CACHE_FILE` (then `TOKEN_CACHE_FILE`) | `api-hub-token-cache.json` in the process working directory |
+| Road Map | `ROADMAP_TOKEN_CACHE_FILE` (then `TOKEN_CACHE_FILE`) | `roadmap-token-cache.json` in the process working directory |
+| Notes | `SAP_NOTES_TOKEN_CACHE_FILE` (then `TOKEN_CACHE_FILE`) | `token-cache.json` in the installed Notes package directory |
+
+Create the parent directory, not an empty state file. Malformed state is ignored during login; it
+is replaced only after a successful, service-validated login. Rejected service caches trigger fresh
+authentication. A temporary validation outage is reported and preserves the cached session.
+
+If login needs MFA, run once with `HEADFUL=true` and complete the browser login. Notes honors this
+on Windows and when launched over stdio. Explicit `DOCKER_ENV=true` or `CI=true` still forces its
+browser to run headless. Use the same absolute SSO path when returning to the MCP client.
+
 ## Tests
 
 Run `npm test -w @marianfoo/sap-mcp-auth` from the repository root for unit tests.

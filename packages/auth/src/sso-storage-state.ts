@@ -1,8 +1,26 @@
 import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { dirname } from 'path';
-import type { BrowserContext, Cookie } from 'playwright';
+import type { BrowserContext, BrowserContextOptions, Cookie } from 'playwright';
 import type { CachedToken, Logger } from './types.js';
 import { serializeCookies } from './cookie-scope.js';
+
+type StorageState = Exclude<BrowserContextOptions['storageState'], string | undefined>;
+
+/** Read defensively so browser login and cookie reuse tolerate an unfinished state file. */
+export function loadSharedSsoStorageState(file: string | undefined, logger: Logger): StorageState | undefined {
+  if (!file || !existsSync(file)) return undefined;
+  try {
+    const state = JSON.parse(readFileSync(file, 'utf-8'));
+    if (!state || !Array.isArray(state.cookies) || (state.origins !== undefined && !Array.isArray(state.origins))) {
+      throw new Error('Invalid storage-state structure');
+    }
+    return { ...state, origins: state.origins ?? [] };
+  } catch {
+    // Parser errors can include cookie values. Log the path, never the file contents.
+    logger.warn(`Ignoring unreadable or malformed shared SAP SSO state: ${file}`);
+    return undefined;
+  }
+}
 
 /**
  * Read the shared SAP SSO Playwright storage-state file and turn its unexpired
@@ -15,13 +33,8 @@ export function loadSharedSsoToken(
   logger: Logger
 ): CachedToken | null {
   try {
-    if (!file || !existsSync(file)) return null;
-
-    const storageState = JSON.parse(readFileSync(file, 'utf-8'));
-    if (!Array.isArray(storageState.cookies)) {
-      logger.warn('Shared SAP SSO storage state has no cookies array, ignoring');
-      return null;
-    }
+    const storageState = loadSharedSsoStorageState(file, logger);
+    if (!storageState) return null;
 
     const nowSeconds = Date.now() / 1000;
     const validCookies: Cookie[] = storageState.cookies.filter((cookie: Cookie) =>
