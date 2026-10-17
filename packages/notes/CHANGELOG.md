@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.10](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.9...sap-note-search-mcp-v0.3.10) (2026-10-17)
+
+
+### Features
+
+* **notes:** add fetch_attachment tool to download SAP Note attachments ([#48](https://github.com/marianfoo/sap-mcp-servers/issues/48)) ([b7f5655](https://github.com/marianfoo/sap-mcp-servers/commit/b7f5655fe60b99ae0003a0d5fd14a37c94a65d29))
+
+
+### Bug Fixes
+
+* **auth:** recover malformed SSO state and validate Notes sessions ([#87](https://github.com/marianfoo/sap-mcp-servers/issues/87)) ([565145c](https://github.com/marianfoo/sap-mcp-servers/commit/565145c5c980c14d10e5b27efa328b433cfe5607))
+* **deps:** refresh SDK and vulnerable dependency resolutions ([#83](https://github.com/marianfoo/sap-mcp-servers/issues/83)) ([e20284b](https://github.com/marianfoo/sap-mcp-servers/commit/e20284b923c92c3896f9d38eb79e6a438cc5c6e6))
+* **notes:** escape Unicode line breaks in SSE responses ([#86](https://github.com/marianfoo/sap-mcp-servers/issues/86)) ([6ca692a](https://github.com/marianfoo/sap-mcp-servers/commit/6ca692ad2ee3992d1cf3358dbbd0e3d74a795eb3))
+* **notes:** honour HEADFUL=true over stdio and on Windows ([#82](https://github.com/marianfoo/sap-mcp-servers/issues/82)) ([267b0f4](https://github.com/marianfoo/sap-mcp-servers/commit/267b0f4ab265619b07fcd771dacc5e26f9d35598))
+* shared SSO state path on Windows, real notes version, keep SSO state on session expiry ([#81](https://github.com/marianfoo/sap-mcp-servers/issues/81)) ([b9ffee1](https://github.com/marianfoo/sap-mcp-servers/commit/b9ffee17604348df056eab591c8eaed1a806604b))
+
 ## [0.3.9](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.8...sap-note-search-mcp-v0.3.9) (2026-09-23)
 
 
