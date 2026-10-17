@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 
@@ -13,6 +13,7 @@ if (!packagePath || !binName || !expectedServerName) {
 }
 
 const packageDir = resolve(packagePath);
+const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
 const entrypoint = join(packageDir, 'dist', 'mcp-server.js');
 const tempDir = mkdtempSync(join(tmpdir(), `${binName}-`));
 const binPath = join(tempDir, binName);
@@ -105,6 +106,7 @@ try {
   assert.equal(response.jsonrpc, '2.0');
   assert.equal(response.id, 1);
   assert.equal(response.result?.serverInfo?.name, expectedServerName);
+  assert.equal(response.result?.serverInfo?.version, manifest.version);
 
   console.log(`${binName} responded to initialize through symlinked bin path.`);
 } finally {

@@ -59,7 +59,7 @@
     "url": "https://github.com/marianfoo/sap-mcp-servers/issues"
   },
   "dependencies": {
-    "@marianfoo/sap-mcp-auth": "^0.1.0",
+    "@marianfoo/sap-mcp-auth": "^0.1.3",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "cors": "^2.8.5",
     "dotenv": "^18.0.6",

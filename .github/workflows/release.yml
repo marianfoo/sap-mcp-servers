@@ -66,7 +66,30 @@ jobs:
         run: |
           set -euo pipefail
           echo "release-please released: $PATHS_RELEASED"
-          for path in $(jq -r '.[]' <<< "$PATHS_RELEASED"); do
+          auth_version=$(node -p 'require("./packages/auth/package.json").version')
+          auth_ready=false
+          # Servers must never be published before their auth dependency is installable.
+          for path in $(jq -r 'sort_by(. != "packages/auth") | .[]' <<< "$PATHS_RELEASED"); do
+            name=$(node -p "require('./$path/package.json').name")
+            version=$(node -p "require('./$path/package.json').version")
+            if [[ "$(npm view "$name@$version" version --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=5000 2>/dev/null)" == "$version" ]]; then
+              echo "$name@$version is already on npm; skipping."
+              continue
+            fi
+            if [[ "$path" != "packages/auth" && "$auth_ready" != true ]]; then
+              # npm may process a newly published version for several minutes.
+              for attempt in {1..60}; do
+                if [[ "$(npm view "@marianfoo/sap-mcp-auth@$auth_version" version --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=5000 2>/dev/null)" == "$auth_version" ]]; then
+                  auth_ready=true
+                  break
+                fi
+                sleep 5
+              done
+              if [[ "$auth_ready" != true ]]; then
+                echo "Auth $auth_version is not available on npm; stopping before server publication." >&2
+                exit 1
+              fi
+            fi
             echo "::group::npm publish $path"
             npm publish --workspace "$path" --provenance --access public
             echo "::endgroup::"

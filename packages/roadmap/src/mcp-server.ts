@@ -15,6 +15,7 @@ import { logger } from './logger.js';
 import { SapRoadmapApiClient } from './roadmap-api.js';
 import { DetailInputSchema, MarkdownInputSchema, RoadmapQueryInputSchema, SearchInputSchema } from './schemas.js';
 import type { RoadmapQuery, ServerConfig } from './types.js';
+import { PACKAGE_VERSION } from './version.js';
 
 class SapRoadmapMcpServer {
   private config: ServerConfig;
@@ -33,7 +34,7 @@ class SapRoadmapMcpServer {
     this.roadmapClient = new SapRoadmapApiClient(this.config);
     this.mcpServer = new McpServer({
       name: 'sap-roadmap-mcp',
-      version: '0.1.0'
+      version: PACKAGE_VERSION
     });
 
     this.setupTools();
