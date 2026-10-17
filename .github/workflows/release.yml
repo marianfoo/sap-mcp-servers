@@ -82,7 +82,7 @@ jobs:
               fi
               if (( attempt < 180 )); then sleep 5; fi
             done
-            echo "::error::$1@$2 is not yet available on npm. Re-run failed jobs once it is available; published versions will be skipped." >&2
+            echo "::error::$1@$2 is not yet available on npm. Re-run failed jobs once it is available; available versions will be skipped." >&2
             npm view "$1@$2" version --prefer-online --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=5000 >&2 || true
             return 1
           }

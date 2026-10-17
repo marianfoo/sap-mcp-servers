@@ -11,6 +11,7 @@ const packages = Object.fromEntries(paths.map(folder => [folder,
   JSON.parse(readFileSync(new URL(`${folder}/package.json`, repo), 'utf8'))]));
 const auth = packages['packages/auth'].name;
 const notes = packages['packages/notes'].name;
+const versions = Object.fromEntries(Object.values(packages).map(pkg => [pkg.name, pkg.version]));
 const workflow = readFileSync(new URL('.github/workflows/release.yml', repo), 'utf8');
 const section = workflow.split('      - name: Publish released packages\n')[1];
 const block = section?.match(/        run: \|\n((?:          .*\n|\n)+)/)?.[1];
@@ -36,7 +37,7 @@ if (args[0] === 'publish') {
   const split = args[1].lastIndexOf('@');
   const name = args[1].slice(0, split);
   const version = args[1].slice(split + 1);
-  if (!state.published.includes(name) || state.unavailable === name) {
+  if (!state.published.includes(name) || state.versions[name] !== version || state.unavailable === name) {
     exit = 1;
   } else if ((state.delays[name] || 0) > 0) {
     state.delays[name]--;
@@ -63,10 +64,11 @@ function simulate(options = {}) {
       writeFileSync(path.join(dir, folder, 'package.json'), JSON.stringify(manifest));
     }
     writeFileSync(path.join(bin, 'npm'), npmMock);
-    writeFileSync(path.join(bin, 'sleep'), '#!/bin/sh\nexit 0\n');
+    writeFileSync(path.join(bin, 'sleep'), '#!/bin/sh\necho "$1" >> "$RELEASE_TEST_STATE.sleeps"\n');
     for (const name of ['npm', 'sleep']) chmodSync(path.join(bin, name), 0o755);
     const stateFile = path.join(dir, 'state.json');
-    writeFileSync(stateFile, JSON.stringify({ published: [], delays: {}, calls: [], visible: [], ...options }));
+    writeFileSync(stateFile, JSON.stringify({ published: [], versions, delays: {}, calls: [], visible: [], ...options }));
+    writeFileSync(`${stateFile}.sleeps`, '');
     const result = spawnSync('bash', ['-c', script], {
       cwd: dir,
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
@@ -75,15 +77,18 @@ function simulate(options = {}) {
     });
     assert.ifError(result.error);
     const state = JSON.parse(readFileSync(stateFile, 'utf8'));
-    return { ...result, ...state, publishCalls: state.calls.filter(args => args[0] === 'publish').map(args => args[2]) };
+    const sleepSeconds = readFileSync(`${stateFile}.sleeps`, 'utf8').split('\n').reduce((sum, value) => sum + Number(value), 0);
+    return { ...result, ...state, sleepSeconds,
+      publishCalls: state.calls.filter(args => args[0] === 'publish').map(args => args[2]) };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 test('auth becoming available after the former five-minute limit still releases consumers', () => {
-  const result = simulate({ delays: { [auth]: 70 } });
+  const result = simulate({ delays: { [auth]: 90 } });
   assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.sleepSeconds >= 450, 'cover at least the observed registry processing delay');
   assert.equal(result.publishCalls[0], 'packages/auth');
   assert.deepEqual(new Set(result.publishCalls), new Set(paths));
   for (const args of result.calls.filter(args => args[0] === 'view')) {
@@ -127,10 +132,18 @@ test('a server-only release cannot publish without its existing auth dependency'
   assert.deepEqual(result.publishCalls, []);
 });
 
+test('an available auth package with the wrong version cannot satisfy the dependency', () => {
+  const result = simulate({ paths: ['packages/notes'], published: [auth], versions: { ...versions, [auth]: '0.0.0' } });
+  assert.notEqual(result.status, 0);
+  assert.deepEqual(result.publishCalls, []);
+});
+
 test('unavailable auth eventually fails without publishing a consumer', () => {
   const result = simulate({ unavailable: auth });
   assert.notEqual(result.status, 0);
   assert.deepEqual(result.publishCalls, ['packages/auth']);
+  assert.ok(result.sleepSeconds >= 14 * 60 && result.sleepSeconds <= 15 * 60,
+    'allow roughly 15 minutes of polling before failing');
   assert.match(result.stderr, /not available|not yet available/);
 });
 
