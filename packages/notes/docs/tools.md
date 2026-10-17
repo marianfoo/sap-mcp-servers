@@ -168,6 +168,71 @@ SAP Note content typically includes these sections:
 
 ---
 
+## `fetch_attachment`
+
+Downloads a file attached to an SAP Note and saves it to disk.
+
+### Input
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string (URL) | yes | Attachment URL taken **verbatim** from the `attachments` array of `fetch()`. These URLs are opaque — do not construct them. |
+| `outputDir` | string | no | Existing local directory. Defaults to a new private directory under OS temp. |
+| `filename` | string | no | Name to save as. Defaults to Content-Disposition, then the URL basename. Directory components are removed. |
+
+### Output
+
+| Field | Type | Description |
+|---|---|---|
+| `path` | string | Absolute path of the saved file |
+| `filename` | string | Name it was saved as |
+| `contentType` | string | Content-Type reported by SAP |
+| `bytes` | number | Size on disk |
+| `sha256` | string | SHA-256 of the bytes |
+
+### Notes
+
+Attachments are served from SAP's support document hosts — observed:
+`documents.support.sap.com` and `userapps.support.sap.com`. Both are needed; several
+notes use one and several use the other. Downloads and every redirect are restricted to an allowlist
+of SAP hosts. TLS certificates are verified. The tool is available over **stdio only**: the returned
+path belongs to the machine running the MCP server.
+
+Existing files and symlinks are never overwritten. Concurrent downloads to the same filename allow
+only one writer. Downloads stop after 60 seconds, five redirects, or 100 MiB of file data.
+The size is checked while reading, including chunked responses. The client requests identity HTTP
+encoding and rejects unexpected compression. Archive files such as ZIP are saved unchanged.
+
+**Authentication can differ from the JSON backend.** Document hosts may require SAP Passport
+even when Notes search works with shared cookies. Set `PFX_PATH` and `PFX_PASSPHRASE` when required;
+the certificate is presented to allowed hosts and cookies retain their domain/path/expiry rules.
+
+**An unauthenticated request answers `HTTP 200` with a ~1.8 KB HTML login stub**, not an
+error status. Saving that blindly would produce a file named `something.png` containing
+JavaScript. The tool rejects login pages and all `text/html` responses, including actual HTML
+attachments; supported binary or text attachments must have a different content type.
+
+### Example
+
+```
+fetch(id="2187425")
+  → attachments: [{ filename: "TCI_for_Customer.pdf", url: "https://userapps.support.sap.com/..." }]
+
+fetch_attachment(url="https://userapps.support.sap.com/...", outputDir="/tmp")
+  → { path: "/tmp/TCI_for_Customer.pdf", contentType: "application/pdf",
+      bytes: 878422, sha256: "6f64e07c7903..." }
+```
+
+After building from the repository root with `npm run build`, verify your setup from `packages/notes`:
+
+```sh
+node scripts/test-attachments.mjs 2187425
+```
+
+The script uses the actual MCP tools and normal server configuration. It fails when a selected note
+has no attachment or a download fails, and verifies the saved bytes and SHA-256 before cleaning up.
+URL, redirect, filename and size-limit regressions run offline in the unit suite.
+
 ## Recommended Workflow
 
 For best results, chain search and fetch:
@@ -189,3 +254,18 @@ For best results, chain search and fetch:
 - Fetch details for top 2-3 most relevant notes
 - Use `includeCorrections=true` only when user asks about patches/corrections/objects
 - Do NOT fetch all results
+
+### Document-host login
+
+`documents.support.sap.com` can require its own session even when Notes search works. The tool first
+tries existing cookies. On a login challenge it opens one temporary, clean browser context for the
+protected Documents entry point, using the same configured SAP password/Passport or interactive
+login. It then retries the bounded HTTPS download once. Only verified Documents cookies are merged
+into the shared SSO file; Notes cookies and origin storage are preserved.
+
+No new setting is needed for password users. Use `HEADFUL=true` for MFA/manual sign-in. Concurrent
+requests share a login attempt. On Documents, HTTP 403, rate limits and server errors do not prompt another login.
+If SAP rejects the completed sign-in, check the credentials or use interactive login, then restart
+the server before trying again. Further automatic password attempts are stopped for that stdio server process.
+The browser closes after the attempt; temporary authentication files are removed. A failed sign-in
+returns an error instead of repeating the ordinary Notes login.

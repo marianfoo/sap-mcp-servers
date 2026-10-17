@@ -128,3 +128,79 @@ for (const origin of [
     assert.deepEqual(result.posted, []);
   });
 }
+
+test('waits through SAP Neo SAML bootstrap pages before entering the password', { timeout: 20000 }, async t => {
+  const context = await browser.newContext({ offline: true });
+  t.after(() => context.close());
+  const filled = [];
+  await context.exposeBinding('captureCredential', ({ frame }, field, value) => filled.push({ field, value, origin: new URL(frame.url()).origin }));
+  await context.route('**/*', async route => {
+    const url = new URL(route.request().url());
+    if (url.hostname === 'documents.support.sap.com') {
+      await route.fulfill({ contentType: 'text/html', headers: { 'com.sap.cloud.security.login': 'login-request' },
+        body: '<form action="https://authn.hana.ondemand.com/saml2/sp/mds"></form><script>setTimeout(()=>location.href="https://authn.hana.ondemand.com/saml2/sp/mds",100)</script>' });
+    } else if (url.hostname === 'authn.hana.ondemand.com') {
+      await route.fulfill({ contentType: 'text/html', body: '<script>setTimeout(()=>location.href="https://accounts.sap.com/saml2/idp/sso",100)</script>' });
+    } else if (url.hostname === 'accounts.sap.com') {
+      await route.fulfill({ contentType: 'text/html', body: form(['username', 'password'], 'https://service.example/done') });
+    } else {
+      await route.fulfill({ contentType: 'text/html', body: '<title>Signed in</title>' });
+    }
+  });
+  const page = await context.newPage();
+  await performPasswordLogin(page, { authMethod: 'password', sapUsername: username, sapPassword: password,
+    headful: false, mfaTimeout: 1000 }, { ...profile, appUrl: 'https://documents.support.sap.com/customerkba/' }, logger);
+  assert.deepEqual(filled.map(f=>f.field), ['username','password']);
+  assert.ok(filled.every(f=>f.origin==='https://accounts.sap.com'));
+});
+
+test('missing second-step password has one wait deadline, not one per selector', { timeout: 90000 }, async t => {
+  const context = await browser.newContext({ offline: true });
+  t.after(() => context.close());
+  await context.exposeBinding('captureCredential', () => {});
+  await context.route('**/*', route => route.fulfill({ contentType: 'text/html',
+    body: form(['username'], 'https://accounts.sap.com/login') }));
+  const page = await context.newPage();
+  const started = Date.now();
+  await assert.rejects(performPasswordLogin(page, {
+    sapUsername: username, sapPassword: password, sapLoginUrl: 'https://accounts.sap.com/login',
+    headful: false, mfaTimeout: 100
+  }, profile, logger), /Could not find password field after username submission/);
+  assert.ok(Date.now() - started < 60000);
+});
+
+test('a silent SAP Neo SAML sign-in returns to the service without filling credentials', { timeout: 10000 }, async t => {
+  const context = await browser.newContext({ offline: true });
+  t.after(() => context.close());
+  await context.route('**/*', async route => {
+    const url = new URL(route.request().url());
+    if (url.hostname === 'documents.support.sap.com' && url.pathname === '/done') {
+      return route.fulfill({ contentType: 'text/html', body: '<title>Documents</title>Signed in' });
+    }
+    if (url.hostname === 'documents.support.sap.com') {
+      return route.fulfill({ contentType: 'text/html', headers: { 'com.sap.cloud.security.login': 'login-request' },
+        body: '<script>setTimeout(()=>location.href="https://accounts.sap.com/saml2/idp/sso",50)</script>' });
+    }
+    return route.fulfill({ contentType: 'text/html', body: '<title>Sign In</title><form method="post" action="https://documents.support.sap.com/done"><input type="hidden" name="SAMLResponse" value="synthetic"></form><script>setTimeout(()=>document.forms[0].submit(),100)</script>' });
+  });
+  const page = await context.newPage();
+  await performPasswordLogin(page, { sapUsername: username, sapPassword: password, headful: false, mfaTimeout: 1000 },
+    { ...profile, appUrl: 'https://documents.support.sap.com/customerkba/' }, logger);
+  assert.equal(page.url(), 'https://documents.support.sap.com/done');
+});
+
+test('hidden duplicate fields do not hide the visible login form', { timeout: 15000 }, async t => {
+  const context = await browser.newContext({ offline: true });
+  t.after(() => context.close());
+  const filled = [];
+  await context.exposeBinding('captureCredential', (_source, field) => filled.push(field));
+  await context.route('**/*', route => route.fulfill({ contentType: 'text/html',
+    body: new URL(route.request().url()).hostname === 'service.example'
+      ? '<title>Application</title>Signed in'
+      : '<input type="hidden" id="j_username" name="username"><input type="hidden" id="j_password" name="password">' +
+        form(['username', 'password'], 'https://service.example/done') }));
+  const page = await context.newPage();
+  await performPasswordLogin(page, { sapLoginUrl: 'https://accounts.sap.com/login',
+    sapUsername: username, sapPassword: password, headful: false, mfaTimeout: 1000 }, profile, logger);
+  assert.deepEqual(filled, ['username', 'password']);
+});
