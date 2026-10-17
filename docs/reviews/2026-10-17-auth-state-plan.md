@@ -28,5 +28,7 @@ Reproduced with four invalid state files in real Chromium and three shared-sessi
   during a service outage.
 - Existing authentication, Notes and shared-path regression suites.
 
-Live SAP checks require a current authenticated session. The saved state returned login HTML on
-2026-10-17; that is not sufficient evidence to mark live qualification complete.
+Live qualification passed on 2026-10-17 with an authorized S-user/password: fresh HEADFUL and
+headless login, protected Notes validation, token-cache reuse and shared-state-only reuse.
+Both reuse paths launched no browser. Actual MCP search/fetch and the combined attachment workflow
+also passed. Credentials and session files are not included in this repository.
