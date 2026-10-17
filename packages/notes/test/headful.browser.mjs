@@ -3,6 +3,7 @@ import test from 'node:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { request } from 'playwright';
 import { SapNoteMcpServer } from '../dist/mcp-server.js';
 import { HttpSapNoteMcpServer } from '../dist/http-mcp-server.js';
 import { createNotesAuthenticator } from '../dist/auth.js';
@@ -32,6 +33,15 @@ for (const Server of [SapNoteMcpServer, HttpSapNoteMcpServer]) {
     });
     const config = Server.prototype.loadConfig.call({});
     assert.equal(config.headful, true);
+    t.mock.method(request, 'newContext', async options => {
+      assert.match(options.extraHTTPHeaders.Cookie, /fixture-session=authenticated/);
+      return {
+        get: async () => ({ status: () => 200, ok: () => true,
+          headers: () => ({ 'content-type': 'application/json' }),
+          text: async () => JSON.stringify({ d: { results: [] } }) }),
+        dispose: async () => {}
+      };
+    });
     const auth = createNotesAuthenticator(config);
     t.after(() => auth.destroy());
     const launch = auth.launchBrowser.bind(auth);

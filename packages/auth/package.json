@@ -22,7 +22,7 @@
     "build": "tsc",
     "clean": "rimraf dist",
     "test": "vitest run",
-    "test:browser": "npm run build && node --test test/ias-login.browser.mjs",
+    "test:browser": "npm run build && node --test test/*.browser.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepack": "npm run clean && npm run build",
