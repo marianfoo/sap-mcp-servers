@@ -11,7 +11,8 @@ Reproduced with four invalid state files in real Chromium and three shared-sessi
 1. Read shared state defensively for both login and reuse. If Playwright rejects its cookie/origin
    fields, create a clean context. Keep the file until a successful, validated login replaces it.
 2. Validate Notes cookies against its existing protected search API, requesting one result. Use
-   the supplied cookies, never an older file. Treat login HTML, redirects and 401/403 as rejection.
+   the supplied cookies with their domain/path/expiry metadata, never an older file. Legacy
+   token-only caches keep their header fallback. Treat login HTML, redirects and 401/403 as rejection.
 3. Run validation on shared-state reuse as well as cached and fresh login. Propagate outages such
    as 429/503 so they do not delete working credentials or trigger another password attempt.
 4. Log resolved cache paths and document how to find them. Keep existing path defaults.
@@ -21,6 +22,8 @@ Reproduced with four invalid state files in real Chromium and three shared-sessi
 - Real Chromium, intercepted network: empty, truncated, wrong-shape and malformed-cookie state.
 - Shared-state validation acceptance, rejection and service outage; preserve failed-login state.
 - Notes profile: partial-login cookies are rejected from both cache sources.
+- Real local HTTP request: cookies from the identity provider, another path and expired cookies
+  must not be sent to the service. A flattened Cookie header fails this regression.
 - Protected API response handling, no redirect following, timeout, cleanup, and cache retention
   during a service outage.
 - Existing authentication, Notes and shared-path regression suites.

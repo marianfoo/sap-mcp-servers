@@ -6,7 +6,7 @@ import { serializeCookies } from './cookie-scope.js';
 
 type StorageState = Exclude<BrowserContextOptions['storageState'], string | undefined>;
 
-/** Read once so both browser login and cookie reuse tolerate an unfinished state file. */
+/** Read defensively so browser login and cookie reuse tolerate an unfinished state file. */
 export function loadSharedSsoStorageState(file: string | undefined, logger: Logger): StorageState | undefined {
   if (!file || !existsSync(file)) return undefined;
   try {

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'fs';
-import { resolve } from 'path';
+import { resolve as resolvePath } from 'path';
 import {
   chromium,
   firefox,
@@ -41,9 +41,9 @@ export class SapWebAuthenticator {
 
   constructor(private readonly config: AuthConfig, private readonly profile: ServiceProfile) {
     this.log = config.logger ?? defaultLogger;
-    if (config.tokenCacheFile) this.log.warn(`${profile.serviceName} token cache: ${resolve(config.tokenCacheFile)}`);
+    if (config.tokenCacheFile) this.log.warn(`${profile.serviceName} token cache: ${resolvePath(config.tokenCacheFile)}`);
     if (config.ssoStorageStateFile) {
-      this.log.warn(`Shared SAP SSO state: ${resolve(config.ssoStorageStateFile)}`);
+      this.log.warn(`Shared SAP SSO state: ${resolvePath(config.ssoStorageStateFile)}`);
     }
   }
 
@@ -202,7 +202,7 @@ export class SapWebAuthenticator {
     if (cached && Date.now() < cached.expiresAt - EXPIRY_BUFFER_MS) {
       if (this.profile.validateSession) {
         this.log.warn(`Validating cached ${this.profile.serviceName} cookies`);
-        if (await this.profile.validateSession(cached.access_token)) {
+        if (await this.profile.validateSession(cached.access_token, cached.cookies)) {
           this.log.warn(`Using cached ${this.profile.serviceName} cookies`);
           this.applyState(cached);
           return;
@@ -218,12 +218,13 @@ export class SapWebAuthenticator {
 
     if (this.config.sharedSsoTokenFastPath && !this.skipSharedSsoOnce) {
       const sso = loadSharedSsoToken(this.config.ssoStorageStateFile, this.config.maxSessionAgeH, this.log);
-      if (sso && (!this.profile.validateSession || await this.profile.validateSession(sso.access_token))) {
+      if (sso && (!this.profile.validateSession || await this.profile.validateSession(sso.access_token, sso.cookies))) {
         this.log.warn('Using shared SAP SSO browser state');
         this.applyState(sso);
         saveCachedToken(this.config.tokenCacheFile, sso, this.log);
         return;
       }
+      if (sso) this.log.warn(`Shared SAP SSO cookies were rejected by ${this.profile.serviceName}; forcing fresh authentication`);
     } else if (this.skipSharedSsoOnce) {
       this.log.warn('Skipping shared SAP SSO browser state for this authentication retry');
       this.skipSharedSsoOnce = false;
@@ -293,7 +294,7 @@ export class SapWebAuthenticator {
         );
       }
 
-      if (this.profile.validateSession && !(await this.profile.validateSession(cookieHeader))) {
+      if (this.profile.validateSession && !(await this.profile.validateSession(cookieHeader, scoped))) {
         throw new AuthenticationError(
           `${this.profile.serviceName} login produced cookies, but the service still rejected the session. ` +
           'Verify access to the service and complete SAP sign-in with HEADFUL=true, ' +

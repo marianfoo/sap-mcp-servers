@@ -64,8 +64,8 @@ export interface ServiceProfile {
   cookieScope: CookieScope;
   /** Substring the post-login URL must contain before the MFA/redirect wait resolves. */
   expectedHost?: string;
-  /** Validates a cookie header against the live service. Runs on BOTH cached reuse and fresh login. */
-  validateSession?: (cookieHeader: string) => Promise<boolean>;
+  /** Validates cached/shared/fresh cookies against the service. Metadata preserves domain/path scope. */
+  validateSession?: (cookieHeader: string, cookies?: Cookie[]) => Promise<boolean>;
   /** Optional override of the "left the auth pages" predicate (used during certificate auth). */
   authCompletePredicate?: (url: string) => boolean;
   userAgent?: string;

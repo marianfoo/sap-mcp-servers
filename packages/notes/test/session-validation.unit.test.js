@@ -3,6 +3,8 @@ import test from 'node:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import http from 'node:http';
+import { once } from 'node:events';
 import { request } from 'playwright';
 import { validateNotesSession } from '../dist/session-validation.js';
 import { createNotesAuthenticator } from '../dist/auth.js';
@@ -35,6 +37,34 @@ test('validates the protected Notes search API using the supplied cookies', asyn
   assert.equal(new URL(calls.url).origin, 'https://me.sap.com');
   assert.equal(new URL(calls.url).searchParams.get('$top'), '1');
   assert.equal(calls.disposed, 1);
+});
+
+test('validation preserves cookie domain and path scope with the real request client', async t => {
+  let sentCookies;
+  const server = http.createServer((req, res) => {
+    sentCookies = req.headers.cookie;
+    res.setHeader('Content-Type', 'application/json');
+    res.end('{"d":{"results":[]}}');
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const newContext = request.newContext.bind(request);
+  t.mock.method(request, 'newContext', async options => {
+    const context = await newContext(options);
+    const get = context.get.bind(context);
+    context.get = (_url, options) => get(`http://127.0.0.1:${server.address().port}/search`, options);
+    return context;
+  });
+  const base = { name: 'session', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Lax' };
+  const cookies = [{ ...base, value: 'service' }, { ...base, value: 'identity-provider', domain: 'localhost' },
+    { ...base, value: 'other-path', path: '/private' }, { ...base, name: 'expired', value: 'expired', expires: 1 }];
+  assert.equal(await validateNotesSession(cookies.map(c => `${c.name}=${c.value}`).join('; '), cookies), true);
+  assert.equal(sentCookies, 'session=service');
+});
+
+test('malformed cookie metadata is rejected before any network request', async () => {
+  assert.equal(await validateNotesSession('session=partial', [{ name: 'session', value: 'partial' }]), false);
 });
 
 for (const status of [301, 302, 307, 401, 403]) {
@@ -83,7 +113,8 @@ for (const cacheSource of ['token', 'shared']) {
     if (cacheSource === 'token') {
       writeFileSync(config.tokenCacheFile, JSON.stringify({ access_token: 'fragmentAfterLogin=partial', expiresAt: Date.now() + 3600000 }));
     } else {
-      writeFileSync(config.ssoStorageStateFile, JSON.stringify({ cookies: [{ name: 'fragmentAfterLogin', value: 'partial', expires: -1 }], origins: [] }));
+      writeFileSync(config.ssoStorageStateFile, JSON.stringify({ cookies: [{ name: 'fragmentAfterLogin', value: 'partial',
+        domain: 'me.sap.com', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'Lax' }], origins: [] }));
     }
     const auth = createNotesAuthenticator(config);
     await assert.rejects(auth.ensureSession(), /No authentication credentials configured/);

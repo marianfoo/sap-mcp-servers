@@ -9,7 +9,7 @@ import { SapWebAuthenticator } from '../dist/authenticator.js';
 const logger = { warn() {}, error() {}, info() {}, debug() {} };
 const cookie = { name: 'session', value: 'synthetic', domain: 'me.sap.com', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'Lax' };
 
-// Use Chromium's actual storage-state parser. Every browser request is intercepted.
+// Exercise Playwright's storage-state validation with Chromium. All browser requests are intercepted.
 for (const [label, state] of Object.entries({ empty: '', malformed: '{', wrongShape: '{"cookies":{}}', badCookie: '{"cookies":[{}],"origins":[]}', rejectedLogin: JSON.stringify({ cookies: [cookie], origins: [] }) })) {
   const accepted = label !== 'rejectedLogin';
   test(accepted ? `recovers from ${label} shared state and saves only a validated login` : 'a rejected fresh login preserves the existing shared file', { timeout: 15000 }, async t => {

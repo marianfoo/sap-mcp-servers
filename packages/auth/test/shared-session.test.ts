@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -27,16 +27,17 @@ it('validates shared SSO cookies before accepting them', async () => {
   const { auth } = fixture(validate);
   expect((await auth.ensureSession()).cookieHeader).toBe('session=old');
   expect((await auth.ensureSession()).cookieHeader).toBe('session=old');
-  expect(validate).toHaveBeenCalledExactlyOnceWith('session=old');
+  expect(validate).toHaveBeenCalledExactlyOnceWith('session=old', [cookie]);
   await auth.destroy();
 });
 
 it('rejects invalid shared cookies without caching them or overwriting the shared file', async () => {
   const validate = vi.fn(async () => false);
-  const { auth, file, original } = fixture(validate);
+  const { auth, file, original, dir } = fixture(validate);
   await expect(auth.ensureSession()).rejects.toThrow('No authentication credentials configured');
   expect(validate).toHaveBeenCalledOnce();
   expect(readFileSync(file, 'utf8')).toBe(original);
+  expect(existsSync(join(dir, 'token.json'))).toBe(false);
   await auth.destroy();
 });
 

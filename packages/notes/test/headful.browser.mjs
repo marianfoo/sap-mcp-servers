@@ -33,8 +33,9 @@ for (const Server of [SapNoteMcpServer, HttpSapNoteMcpServer]) {
     });
     const config = Server.prototype.loadConfig.call({});
     assert.equal(config.headful, true);
+    let validationOptions;
     t.mock.method(request, 'newContext', async options => {
-      assert.match(options.extraHTTPHeaders.Cookie, /fixture-session=authenticated/);
+      validationOptions = options;
       return {
         get: async () => ({ status: () => 200, ok: () => true,
           headers: () => ({ 'content-type': 'application/json' }),
@@ -74,6 +75,9 @@ for (const Server of [SapNoteMcpServer, HttpSapNoteMcpServer]) {
     const session = await auth.ensureSession();
     assert.equal(session.authMethod, 'interactive');
     assert.match(session.cookieHeader, /fixture-session=authenticated/);
+    assert.equal(validationOptions.extraHTTPHeaders.Cookie, undefined);
+    assert.ok(validationOptions.storageState.cookies.some(cookie =>
+      cookie.name === 'fixture-session' && cookie.value === 'authenticated' && cookie.domain === 'me.sap.com'));
     assert.equal(launches, 1);
     assert.equal(JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8')).cookies[0].value, 'authenticated');
   });
