@@ -154,6 +154,7 @@ export class SapNotesApiClient {
   
   // Persistent browser session to avoid session cookie expiration
   private browser: Browser | null = null;
+  private browserInitPromise: Promise<void> | null = null;
   private browserContext: any = null;
   private browserLastUsed: number = 0;
   private readonly BROWSER_IDLE_TIMEOUT = 5 * 60 * 1000; // Close browser after 5 minutes idle
@@ -2105,6 +2106,18 @@ export class SapNotesApiClient {
    * Shared by Coveo token Playwright fallback and note retrieval.
    */
   private async ensurePersistentBrowser(token: string): Promise<void> {
+    if (this.browserInitPromise) return this.browserInitPromise;
+
+    // Share the whole initialization, including idle teardown and context setup.
+    this.browserInitPromise = this.initializePersistentBrowser(token);
+    try {
+      await this.browserInitPromise;
+    } finally {
+      this.browserInitPromise = null;
+    }
+  }
+
+  private async initializePersistentBrowser(token: string): Promise<void> {
     const now = Date.now();
 
     // Close idle browser
