@@ -35,10 +35,10 @@
     "prepare": "husky || true"
   },
   "devDependencies": {
-    "@commitlint/cli": "^21.2.3",
+    "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.3",
     "husky": "^9.1.7",
-    "rimraf": "^6.0.0",
+    "rimraf": "^6.1.4",
     "typescript": "^7.0.2"
   }
 }
