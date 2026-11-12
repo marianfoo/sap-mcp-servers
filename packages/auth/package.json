@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./cert-client": {
+      "types": "./dist/cert-client.d.ts",
+      "import": "./dist/cert-client.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

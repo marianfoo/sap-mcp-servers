@@ -176,6 +176,44 @@ identity provider.
 
 `isOnAuthPage`, `isAuthUrl`, `selectCookies`, `serializeCookies`, `defaultLogger`, and the error classes `AuthenticationError`, `CertificateLoadError`, `AuthenticationTimeoutError`, `BrowserNotFoundError`. The `Logger` interface lets you inject your own logger (`{ warn, error, info, debug }`); a stderr `defaultLogger` is used otherwise.
 
+### `CertHttpsClient`: certificate login without a browser
+
+For SAP services that accept the SAP Passport on every request, such as the Software Center OData
+service and `softwaredownloads.sap.com`, `CertHttpsClient` needs no Playwright. Import it from the
+subpath `@marianfoo/sap-mcp-auth/cert-client`, which does not load the browser login:
+
+```ts
+import { readFileSync } from 'node:fs';
+import { CertHttpsClient } from '@marianfoo/sap-mcp-auth/cert-client';
+
+const client = new CertHttpsClient({ pfx: readFileSync(process.env.PFX_PATH!), passphrase: process.env.PFX_PASSPHRASE });
+const res = await client.fetch('https://launchpad.support.sap.com/services/odata/svt/swdcuisrv/DownloadAuthProfileSet?$format=json');
+```
+
+Each call follows redirects and posts SAML auto-submit pages (a form of hidden fields only) until
+the final response; `open()` leaves its body a stream, for downloads. One in-memory cookie jar
+(Domain, Path, expiry) spans all hosts; `reset()` clears it. Only HTTPS is followed. A page with a
+visible field, such as a login form, is returned instead of posted. The logger gets each form step
+and hop as method, host, path and status: never a query string, cookie or form value.
+
+A BTP app behind an approuter needs one more step. Without a session, it answers with a page whose
+script sets cookies and sends the browser to XSUAA. The XSUAA login page names its identity provider
+in a meta redirect. `approuterLogin(target, page)` takes that page and does both steps in code. The
+redirects and the SAML forms do the rest, up to the app's callback, which sets the session. Then
+call the resource again:
+
+```ts
+let res = await client.fetch(url, { headers: { Accept: 'application/json' } });
+if (String(res.headers['content-type']).includes('html') && await client.approuterLogin(url, res.body.toString('utf8'))) {
+  res = await client.fetch(url, { headers: { Accept: 'application/json' } });
+}
+```
+
+It returns false for any other page, and it refuses a step to a host outside `allowedHosts`
+(default `SAP_LOGIN_HOSTS`: `*.ondemand.com` and `*.sap.com`), because the client presents the
+certificate on every request. On the way it reads only HTML pages, so the resource the app
+redirects back to is not downloaded twice. `parseApprouterPage` and `metaRedirect` are exported too.
+
 ## Security
 
 The `tokenCacheFile` and the SSO `storageStateFile` contain **live SAP session cookies**. Treat them as secrets: store them outside your repo (e.g. `~/.sap-mcp/`), never commit them, and add them to `.gitignore`. Credentials and passphrases are never written to these files, but the cookies they hold can be used to act as you on SAP services until they expire.
