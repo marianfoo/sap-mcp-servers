@@ -238,6 +238,26 @@ Get the full content of SAP Note 2744792
 Show me note 3481252 with correction details
 ```
 
+### `support_package_notes`
+
+Lists what an SAP Support Package delivers — the same data as SAP for Me → Software Downloads → package details
+(tabs *SAP Notes*, *Side-Effect Solutions*, *Package Conditions*, *Object List*).
+
+```json
+{ "package": "SAPKE608G4", "include": ["notes", "sideEffects"], "component": "PY-DE" }
+```
+
+| Parameter | Description |
+|---|---|
+| `package` | SP name as shown in the download center (e.g. `SAPKE608G4`, `SAPK-60899INSAPHRCDE`) or the numeric download object key |
+| `include` | `notes` (default), `sideEffects`, `conditions`, `objects` |
+| `component` | Optional component prefix filter for notes, e.g. `PY-DE` |
+| `maxNotes` / `maxObjects` | Upper bounds (defaults 2000 / 300) |
+| `lang` | `EN` (default) or `DE` for priority/category texts |
+
+Uses the `swdcuisap4mesrv` OData service behind me.sap.com with the same session as `fetch`; your S-user needs
+software download authorization.
+
 ### `fetch_attachment` (stdio)
 
 Pass an attachment URL returned by `fetch` to download that file locally. Optional `outputDir`

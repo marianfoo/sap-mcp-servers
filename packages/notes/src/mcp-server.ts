@@ -29,6 +29,7 @@ import {
   SAP_NOTE_ATTACHMENT_DESCRIPTION
 } from './schemas/sap-notes.js';
 import { parseNoteContent } from './html-utils.js';
+import { registerSupportPackageTool } from './support-package-tool.js';
 
 // Get the directory of this module for resolving paths
 const __filename = fileURLToPath(import.meta.url);
@@ -364,6 +365,8 @@ class SapNoteMcpServer {
         }
       }
     );
+
+    registerSupportPackageTool(this.mcpServer, this.sapNotesClient, fn => this.withAuthRetry(fn));
 
     this.mcpServer.registerTool(
       'fetch_attachment',

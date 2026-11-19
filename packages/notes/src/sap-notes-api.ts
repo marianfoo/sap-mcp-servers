@@ -22,6 +22,28 @@ import {
   isAuthenticationBootstrapResponse,
   mapSapNotesSearchResponse
 } from './sap-notes-backend.js';
+import {
+  SECTION_NAVIGATION,
+  SWDC_PAGE_SIZE,
+  SWDC_SERVICE_PATH,
+  buildPageParams,
+  buildSearchParams,
+  filterNotesByComponent,
+  isObjectKey,
+  mapCondition,
+  mapHeader,
+  mapNote,
+  mapObject,
+  mapSearchCandidates,
+  mapSideEffect,
+  normalizePackageInput,
+  objectPath,
+  pickCandidate,
+  readODataPage,
+  summarizeByComponent,
+  type SupportPackageContent,
+  type SupportPackageSection
+} from './support-package-backend.js';
 
 const CORRINS_PATH =
   '/backend/raw/core/W7LegacyProxyVerticle/odata/svt/snogwscorrins/CorrInsSet';
@@ -384,6 +406,111 @@ export class SapNotesApiClient {
     const detail = this.buildNoteDetail(sapNote, noteId);
     logger.info(`✅ Retrieved SAP Note ${noteId} via SAP for Me backend`);
     return detail;
+  }
+
+  /** Page through a Software Download Center navigation collection (max `limit` rows). */
+  private async fetchSwdcCollection(
+    objectKey: string,
+    navigation: string,
+    token: string,
+    limit: number,
+    language?: string
+  ): Promise<{ rows: Record<string, unknown>[]; count: number | null }> {
+    const rows: Record<string, unknown>[] = [];
+    let count: number | null = null;
+    while (rows.length < limit) {
+      const top = Math.min(SWDC_PAGE_SIZE, limit - rows.length);
+      const page = readODataPage(await this.fetchBackendJson(
+        objectPath(objectKey, navigation),
+        token,
+        buildPageParams(rows.length, top, language)
+      ));
+      count ??= page.count;
+      rows.push(...page.rows);
+      if (page.rows.length < top || (count !== null && rows.length >= count)) break;
+    }
+    return { rows, count: count ?? rows.length };
+  }
+
+  /** Resolve a support package name (e.g. SAPKE608G4) to its download object key. */
+  async resolveSupportPackage(nameOrKey: string, token: string): Promise<string> {
+    const input = normalizePackageInput(nameOrKey);
+    if (isObjectKey(input)) return input;
+
+    const candidates = mapSearchCandidates(
+      await this.fetchBackendJson(`${SWDC_SERVICE_PATH}/SearchResultSet`, token, buildSearchParams(input))
+    );
+    const match = pickCandidate(candidates, input);
+    if (match) return match.objectKey;
+
+    if (candidates.length === 0) {
+      throw new Error(`No download object found for "${input}" in the SAP Software Download Center (check the name or your download authorization).`);
+    }
+    const list = candidates.slice(0, 10).map(c => `${c.name} (${c.description}, ${c.type}, key ${c.objectKey})`).join('; ');
+    throw new Error(`"${input}" is ambiguous. Candidates: ${list}. Pass the exact package name or the object key.`);
+  }
+
+  /**
+   * Content of a support package as shown in SAP for Me → Software Downloads → package details:
+   * delivered SAP Notes, side-effect solutions, import conditions and object list.
+   */
+  async getSupportPackageContent(
+    nameOrKey: string,
+    token: string,
+    options: {
+      include?: SupportPackageSection[];
+      component?: string;
+      maxNotes?: number;
+      maxObjects?: number;
+      language?: string;
+    } = {}
+  ): Promise<SupportPackageContent> {
+    const include = new Set<SupportPackageSection>(options.include?.length ? options.include : ['notes']);
+    const maxNotes = options.maxNotes ?? 2000;
+    const maxObjects = options.maxObjects ?? 500;
+    const language = options.language;
+
+    const objectKey = await this.resolveSupportPackage(nameOrKey, token);
+    const header = mapHeader(
+      await this.fetchBackendJson(objectPath(objectKey), token, language ? { $format: 'json', 'sap-language': language } : { $format: 'json' }),
+      objectKey
+    );
+
+    const content: SupportPackageContent = {
+      package: header,
+      noteCount: 0,
+      url: `https://me.sap.com/softwarecenter/object/${objectKey}`
+    };
+    const truncated: SupportPackageContent['truncated'] = {};
+
+    if (include.has('notes')) {
+      // Always load all notes so component filtering and counts are complete.
+      const { rows, count } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.notes, token, maxNotes, language);
+      const all = rows.map(mapNote).sort((a, b) =>
+        a.component.localeCompare(b.component) || a.id.localeCompare(b.id, undefined, { numeric: true }));
+      content.noteCount = count ?? all.length;
+      content.notes = filterNotesByComponent(all, options.component);
+      content.notesByComponent = summarizeByComponent(content.notes);
+      if (count !== null && rows.length < count) truncated.notes = true;
+    }
+    if (include.has('sideEffects')) {
+      const { rows } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.sideEffects, token, 2000, language);
+      content.sideEffects = rows.map(mapSideEffect);
+    }
+    if (include.has('conditions')) {
+      const { rows } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.conditions, token, 500, language);
+      content.conditions = rows.map(mapCondition);
+    }
+    if (include.has('objects')) {
+      const { rows, count } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.objects, token, maxObjects, language);
+      content.objects = rows.map(mapObject);
+      content.objectCount = count ?? rows.length;
+      if (count !== null && rows.length < count) truncated.objects = true;
+    }
+    if (Object.keys(truncated).length) content.truncated = truncated;
+
+    logger.info(`✅ Retrieved support package ${header.name}: ${content.noteCount} note(s)`);
+    return content;
   }
 
   /**
