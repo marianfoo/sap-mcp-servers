@@ -429,7 +429,10 @@ export class SapNotesApiClient {
       rows.push(...page.rows);
       if (page.rows.length < top || (count !== null && rows.length >= count)) break;
     }
-    return { rows, count: count ?? rows.length };
+    // Some collections (e.g. ObjectList) ignore $top and omit __count: they return
+    // everything at once. Use the fetched size as total and cap what we hand back.
+    const total = count ?? rows.length;
+    return { rows: rows.slice(0, limit), count: total };
   }
 
   /** Resolve a support package name (e.g. SAPKE608G4) to its download object key. */
