@@ -40,8 +40,8 @@ export function loadConfig(): ServerConfig {
   const hasPassword = !!(sapUsername && sapPassword);
   const hasCertificate = !!(pfxPath && pfxPassphrase);
 
-  if (!hasPassword && !hasCertificate) {
-    logger.warn('No SAP auth credentials configured. Set SAP_USERNAME + SAP_PASSWORD or PFX_PATH + PFX_PASSPHRASE.');
+  if (!hasPassword && !hasCertificate && process.env.HEADFUL !== 'true') {
+    logger.warn('No SAP auth credentials configured. Set SAP_USERNAME + SAP_PASSWORD or PFX_PATH + PFX_PASSPHRASE, or set HEADFUL=true for interactive sign-in.');
   }
 
   return {

@@ -411,7 +411,8 @@ export async function performInteractiveLogin(
   page: Page,
   config: AuthConfig,
   profile: ServiceProfile,
-  logger: Logger
+  logger: Logger,
+  deadline: number
 ): Promise<void> {
   if (!config.headful) {
     throw new AuthenticationError('Interactive SAP login requires HEADFUL=true');
@@ -425,13 +426,10 @@ export async function performInteractiveLogin(
   for (const target of targets) {
     logger.warn(`Opening SAP login page for manual sign-in: ${target}`);
     await openAuthPage(page, target, 'SAP login', logger);
-    if (isOnAuthPage(page.url(), await page.title())) {
-      logger.warn(`Complete SAP sign-in in the browser window (timeout: ${config.mfaTimeout / 1000}s)`);
-      await page.waitForURL(url => !isAuthUrl(url.toString().toLowerCase()), { timeout: config.mfaTimeout }).catch(() => {});
-    }
-    if (isOnAuthPage(page.url(), await page.title())) {
-      throw new AuthenticationError('Manual SAP login did not complete before the timeout');
+    while (isOnAuthPage(page.url(), await page.title())) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new AuthenticationError('Manual SAP login did not complete before the timeout');
+      await page.waitForTimeout(Math.min(500, remaining));
     }
   }
-  logger.warn('Manual SAP login completed');
 }

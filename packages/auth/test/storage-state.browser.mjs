@@ -52,7 +52,7 @@ for (const sharedLogin of [true, false]) {
     const start = 'https://me.sap.com/home';
     const visited = [];
     const auth = new SapWebAuthenticator({
-      authMethod: 'auto', headful: true, mfaTimeout: 500, maxSessionAgeH: 1,
+      authMethod: 'auto', headful: true, mfaTimeout: 5000, maxSessionAgeH: 1,
       sapLoginUrl: sharedLogin ? start : undefined,
       ssoStorageStateFile: sharedLogin ? join(dir, 'state.json') : undefined,
       tokenCacheFile: join(dir, 'token.json'), logger
@@ -63,9 +63,11 @@ for (const sharedLogin of [true, false]) {
       const browser = await chromium.launch();
       const create = browser.newContext.bind(browser);
       browser.newContext = async options => {
+        if (!sharedLogin) assert.equal(options.storageState, undefined);
         const context = await create(options);
         await context.route('**/*', route => {
-          visited.push(route.request().url());
+          if (route.request().isNavigationRequest()) visited.push(route.request().url());
+          if (!sharedLogin) return route.fulfill({ contentType: 'text/html', body: '<title>Overview</title><script>setTimeout(() => { document.cookie = "app=ready; Path=/" }, 300)</script>' });
           return route.fulfill({ contentType: 'text/html', body: '<title>Signed in</title>',
             headers: { 'set-cookie': route.request().url() === appUrl ? 'app=ready; Path=/' : 'idp=ready; Path=/' } });
         });
@@ -74,6 +76,7 @@ for (const sharedLogin of [true, false]) {
       return browser;
     };
     assert.equal((await auth.ensureSession()).cookieHeader, 'app=ready');
+    assert.equal(existsSync(join(dir, 'state.json')), sharedLogin);
     assert.deepEqual(visited, sharedLogin ? [start, appUrl] : [appUrl]);
   });
 }

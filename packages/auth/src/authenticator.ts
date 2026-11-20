@@ -271,36 +271,19 @@ export class SapWebAuthenticator {
         dialog.dismiss().catch(() => {});
       });
 
+      const deadline = Date.now() + this.config.mfaTimeout;
       if (authMethod === 'password') {
         await performPasswordLogin(this.page, this.config, this.profile, this.log);
       } else if (authMethod === 'certificate') {
         await performCertificateNavigation(this.page, this.config, this.profile, this.log);
       } else {
-        await performInteractiveLogin(this.page, this.config, this.profile, this.log);
+        await performInteractiveLogin(this.page, this.config, this.profile, this.log, deadline);
       }
 
-      await this.page.waitForTimeout(1500);
-
-      const allCookies = await this.context.cookies();
-      if (allCookies.length === 0) {
-        throw new AuthenticationError('Authentication appeared to succeed but no cookies were set');
-      }
-
-      const scoped = await selectCookies(this.context, this.profile.cookieScope);
-      const cookieHeader = serializeCookies(scoped);
-      if (!cookieHeader) {
-        throw new AuthenticationError(
-          `${this.profile.serviceName} login completed but no cookies were captured for the configured scope`
-        );
-      }
-
-      if (this.profile.validateSession && !(await this.profile.validateSession(cookieHeader, scoped))) {
-        throw new AuthenticationError(
-          `${this.profile.serviceName} login produced cookies, but the service still rejected the session. ` +
-          'Verify access to the service and complete SAP sign-in with HEADFUL=true, ' +
-          'or configure SAP Passport auth with PFX_PATH and PFX_PASSPHRASE.'
-        );
-      }
+      if (authMethod !== 'interactive') await this.page.waitForTimeout(1500);
+      const { scoped, cookieHeader } = await this.captureSession(
+        this.context, this.page, authMethod === 'interactive' ? deadline : 0
+      );
 
       const expiresAt = Date.now() + this.config.maxSessionAgeH * 60 * 60 * 1000;
       this.authState = { token: cookieHeader, cookies: scoped, expiresAt, authMethod };
@@ -316,6 +299,24 @@ export class SapWebAuthenticator {
       throw error;
     } finally {
       await this.cleanup();
+    }
+  }
+
+  /** A public landing page may render before the user selects Log On or finishes MFA. */
+  private async captureSession(context: BrowserContext, page: Page, deadline: number) {
+    for (;;) {
+      const scoped = await selectCookies(context, this.profile.cookieScope);
+      const cookieHeader = serializeCookies(scoped);
+      if (cookieHeader && (!this.profile.validateSession || await this.profile.validateSession(cookieHeader, scoped))) {
+        return { scoped, cookieHeader };
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new AuthenticationError(cookieHeader
+          ? `${this.profile.serviceName} login produced cookies, but the service still rejected the session. Verify service access and complete SAP sign-in.`
+          : `${this.profile.serviceName} login completed but no cookies were captured for the configured scope`);
+      }
+      await page.waitForTimeout(Math.min(3000, remaining));
     }
   }
 
