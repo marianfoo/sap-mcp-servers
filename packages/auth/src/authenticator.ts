@@ -142,14 +142,14 @@ export class SapWebAuthenticator {
       this.log.warn('Auto auth: using SAP Passport certificate authentication');
       return 'certificate';
     }
-    if (this.config.ssoStorageStateFile && this.config.headful) {
+    if (this.config.headful) {
       this.log.warn('Auto auth: no credentials configured, using interactive browser login');
       return 'interactive';
     }
 
     throw new AuthenticationError(
       'No authentication credentials configured. Set SAP_USERNAME + SAP_PASSWORD, PFX_PATH + PFX_PASSPHRASE, ' +
-      'or SAP_SSO_STORAGE_STATE with HEADFUL=true for interactive login.'
+      'or HEADFUL=true for interactive login.'
     );
   }
 

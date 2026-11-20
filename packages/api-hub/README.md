@@ -75,7 +75,7 @@ HEADFUL=true
 
 The cookie cache is stored in `api-hub-token-cache.json` in the server working directory and expires after `MAX_COOKIE_AGE_H` hours.
 
-API Hub auth first opens the shared SAP login start URL (`SAP_LOGIN_URL`, default `https://me.sap.com/home`) to establish SAP SSO, then opens `api.sap.com` to mint API Hub-specific cookies. Set `SAP_SSO_STORAGE_STATE`, for example `~/.sap-mcp/sso-storage-state.json`, if you want SAP MCP servers to reuse the same `accounts.sap.com` browser SSO cookies. Each app still keeps its own app-specific token cache.
+API Hub opens api.sap.com in a clean browser context and caches the validated service cookies in `API_HUB_TOKEN_CACHE_FILE`. Use `HEADFUL=true` for manual sign-in without a configured password or PFX. The shared Notes/Roadmap browser state is not used by API Hub.
 
 For installed/package usage you can point the server at an explicit env file and token cache path:
 
@@ -231,7 +231,7 @@ Local development:
 }
 ```
 
-Supported `env` keys: `SAP_USERNAME`, `SAP_PASSWORD`, `PFX_PATH`, `PFX_PASSPHRASE`, `AUTH_METHOD`, `HEADFUL`, `MFA_TIMEOUT`, `API_HUB_TOKEN_CACHE_FILE`, `SAP_SSO_STORAGE_STATE`, `ENV_FILE`, `MCP_MODE`.
+Supported `env` keys: `SAP_USERNAME`, `SAP_PASSWORD`, `PFX_PATH`, `PFX_PASSPHRASE`, `AUTH_METHOD`, `HEADFUL`, `MFA_TIMEOUT`, `API_HUB_TOKEN_CACHE_FILE`, `ENV_FILE`, `MCP_MODE`.
 
 Streamable HTTP MCP client config:
 

@@ -416,23 +416,22 @@ export async function performInteractiveLogin(
   if (!config.headful) {
     throw new AuthenticationError('Interactive SAP login requires HEADFUL=true');
   }
-  const target = config.sapLoginUrl ?? profile.appUrl;
-  if (!target) {
+  const targets = new Set([config.sapLoginUrl, profile.appUrl].filter((url): url is string => !!url));
+  if (!targets.size) {
     throw new AuthenticationError('No sapLoginUrl or appUrl configured for interactive authentication');
   }
 
-  logger.warn(`Opening SAP login page for manual sign-in: ${target}`);
-  await openAuthPage(page, target, 'SAP login', logger);
-
-  if (isOnAuthPage(page.url(), await page.title())) {
-    logger.warn(`Complete SAP sign-in in the browser window (timeout: ${config.mfaTimeout / 1000}s)`);
-    await page.waitForURL(url => !isAuthUrl(url.toString().toLowerCase()), { timeout: config.mfaTimeout }).catch(() => {
-      logger.warn('Manual login wait timed out; checking whether cookies are still usable');
-    });
-  }
-
-  if (isOnAuthPage(page.url(), await page.title())) {
-    throw new AuthenticationError('Manual SAP login did not complete before the timeout');
+  // The identity provider login can succeed before the application has issued its cookies.
+  for (const target of targets) {
+    logger.warn(`Opening SAP login page for manual sign-in: ${target}`);
+    await openAuthPage(page, target, 'SAP login', logger);
+    if (isOnAuthPage(page.url(), await page.title())) {
+      logger.warn(`Complete SAP sign-in in the browser window (timeout: ${config.mfaTimeout / 1000}s)`);
+      await page.waitForURL(url => !isAuthUrl(url.toString().toLowerCase()), { timeout: config.mfaTimeout }).catch(() => {});
+    }
+    if (isOnAuthPage(page.url(), await page.title())) {
+      throw new AuthenticationError('Manual SAP login did not complete before the timeout');
+    }
   }
   logger.warn('Manual SAP login completed');
 }
