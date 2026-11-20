@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { SapNoteMcpServer } from '../packages/notes/dist/mcp-server.js';
 import { HttpSapNoteMcpServer } from '../packages/notes/dist/http-mcp-server.js';
 
+import { createApiHubAuthenticator } from '../packages/api-hub/dist/auth.js';
 import { loadConfig as apiHubConfig } from '../packages/api-hub/dist/config.js';
 import { loadConfig as roadmapConfig } from '../packages/roadmap/dist/config.js';
 import { loadAuthConfigFromEnv } from '../packages/auth/dist/auth-config.js';
@@ -82,4 +83,12 @@ test('different MCP working directories resolve to the same shared state file', 
   } finally {
     process.chdir(cwd);
   }
+});
+
+test('API Hub intentionally ignores shared browser state and starts at its own service', () => {
+  const auth = withEnv({ SAP_SSO_STORAGE_STATE: 'shared.json', SAP_LOGIN_URL: 'https://me.sap.com/home' },
+    () => createApiHubAuthenticator(apiHubConfig()));
+  assert.equal(auth.config.ssoStorageStateFile, undefined);
+  assert.equal(auth.config.sapLoginUrl, undefined);
+  assert.equal(new URL(auth.profile.appUrl).hostname, 'api.sap.com');
 });

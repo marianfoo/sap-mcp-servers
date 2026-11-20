@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./cert-client": {
+      "types": "./dist/cert-client.d.ts",
+      "import": "./dist/cert-client.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -60,9 +64,12 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
-    "playwright": "^1.64.1",
+    "playwright": "^1.65.1",
     "rimraf": "^6.0.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "tough-cookie": "^6.1.0"
   }
 }

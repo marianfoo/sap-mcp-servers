@@ -134,5 +134,5 @@ test('the HTTP server does not expose the local file-writing tool', async t => {
   const [a, b] = InMemoryTransport.createLinkedPair();
   t.after(async () => { await client.close(); await mcp.close(); });
   await Promise.all([client.connect(a), mcp.connect(b)]);
-  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name).sort(), ['fetch', 'search']);
+  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name).sort(), ['fetch', 'search', 'support_package_notes']);
 });

@@ -44,3 +44,43 @@ for (const [label, state] of Object.entries({ empty: '', malformed: '{', wrongSh
     assert.equal(JSON.parse(readFileSync(stateFile, 'utf8')).cookies[0].value, 'synthetic');
   });
 }
+
+for (const sharedLogin of [true, false]) {
+  test(sharedLogin ? 'Roadmap visits its app after interactive SSO' : 'API Hub can sign in interactively in a clean context', async t => {
+    const dir = mkdtempSync(join(tmpdir(), 'sap-app-login-'));
+    const appUrl = sharedLogin ? 'https://roadmaps.sap.com/board' : 'https://api.sap.com/api/salesorder/overview';
+    const start = 'https://me.sap.com/home';
+    const visited = [];
+    const auth = new SapWebAuthenticator({
+      authMethod: 'auto', headful: true, mfaTimeout: 5000, maxSessionAgeH: 1,
+      sapLoginUrl: sharedLogin ? start : undefined,
+      ssoStorageStateFile: sharedLogin ? join(dir, 'state.json') : undefined,
+      tokenCacheFile: join(dir, 'token.json'), logger
+    }, { serviceName: 'test service', appUrl, cookieScope: { type: 'url', url: appUrl },
+      validateSession: async cookies => cookies === 'app=ready' });
+    t.after(async () => { await auth.destroy(); rmSync(dir, { recursive: true, force: true }); });
+    auth.launchBrowser = async () => {
+      const browser = await chromium.launch();
+      const create = browser.newContext.bind(browser);
+      browser.newContext = async options => {
+        if (!sharedLogin) assert.equal(options?.storageState, undefined);
+        const context = await create(options);
+        await context.route('**/*', async route => {
+          if (route.request().isNavigationRequest()) visited.push(route.request().url());
+          if (!sharedLogin) return route.fulfill({ contentType: 'text/html', body: '<title>Overview</title><script>setTimeout(() => { document.cookie = "app=ready; Path=/" }, 300)</script>' });
+          if (route.request().url() === start) {
+            return route.fulfill({ contentType: 'text/html', body: '<title>Log On</title><script>setTimeout(() => { document.title = "Welcome"; document.cookie = "idp=ready; Path=/" }, 200)</script>' });
+          }
+          assert.ok((await context.cookies(start)).some(cookie => cookie.name === 'idp'));
+          return route.fulfill({ contentType: 'text/html', body: '<title>Signed in</title>',
+            headers: { 'set-cookie': route.request().url() === appUrl ? 'app=ready; Path=/' : 'idp=ready; Path=/' } });
+        });
+        return context;
+      };
+      return browser;
+    };
+    assert.equal((await auth.ensureSession()).cookieHeader, 'app=ready');
+    assert.equal(existsSync(join(dir, 'state.json')), sharedLogin);
+    assert.deepEqual(visited, sharedLogin ? [start, appUrl] : [appUrl]);
+  });
+}

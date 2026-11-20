@@ -22,6 +22,28 @@ import {
   isAuthenticationBootstrapResponse,
   mapSapNotesSearchResponse
 } from './sap-notes-backend.js';
+import {
+  SECTION_NAVIGATION,
+  DEFAULT_MAX_NOTES, MAX_PACKAGE_NOTES, SWDC_PAGE_SIZE,
+  SWDC_SERVICE_PATH,
+  buildPageParams,
+  buildSearchParams,
+  filterNotesByComponent,
+  isObjectKey,
+  mapCondition,
+  mapHeader,
+  mapNote,
+  mapObject,
+  mapSearchCandidates,
+  mapSideEffect,
+  normalizePackageInput,
+  objectPath,
+  pickCandidate,
+  readODataPage,
+  summarizeByComponent,
+  type SupportPackageContent,
+  type SupportPackageSection
+} from './support-package-backend.js';
 
 const CORRINS_PATH =
   '/backend/raw/core/W7LegacyProxyVerticle/odata/svt/snogwscorrins/CorrInsSet';
@@ -154,6 +176,7 @@ export class SapNotesApiClient {
   
   // Persistent browser session to avoid session cookie expiration
   private browser: Browser | null = null;
+  private browserInitPromise: Promise<void> | null = null;
   private browserContext: any = null;
   private browserLastUsed: number = 0;
   private readonly BROWSER_IDLE_TIMEOUT = 5 * 60 * 1000; // Close browser after 5 minutes idle
@@ -384,6 +407,115 @@ export class SapNotesApiClient {
     const detail = this.buildNoteDetail(sapNote, noteId);
     logger.info(`✅ Retrieved SAP Note ${noteId} via SAP for Me backend`);
     return detail;
+  }
+
+  /** Page through a Software Download Center navigation collection (max `limit` rows). */
+  private async fetchSwdcCollection(
+    objectKey: string,
+    navigation: string,
+    token: string,
+    limit: number,
+    language?: string
+  ): Promise<{ rows: Record<string, unknown>[]; count: number | null; truncated: boolean }> {
+    const rows: Record<string, unknown>[] = [];
+    let count: number | null = null;
+    // One extra row distinguishes an exact fit from a partial result when SAP omits __count.
+    while (rows.length <= limit) {
+      const top = Math.min(SWDC_PAGE_SIZE, limit + 1 - rows.length);
+      const page = readODataPage(await this.fetchBackendJson(
+        objectPath(objectKey, navigation), token, buildPageParams(rows.length, top, language)
+      ));
+      count ??= page.count;
+      for (const row of page.rows) rows.push(row);
+      if (count !== null && count < rows.length) count = null;
+      if (page.rows.length === 0 || (count !== null && rows.length >= Math.min(limit, count))) break;
+      if (count === null && page.rows.length < top && !page.hasNext) break;
+    }
+    const truncated = (count ?? rows.length) > limit || (count !== null && rows.length < count);
+    return { rows: rows.slice(0, limit), count: count ?? (truncated ? null : rows.length), truncated };
+  }
+
+  /** Resolve a support package name (e.g. SAPKE608G4) to its download object key. */
+  async resolveSupportPackage(nameOrKey: string, token: string, language?: string): Promise<string> {
+    const input = normalizePackageInput(nameOrKey);
+    if (isObjectKey(input)) return input;
+
+    const candidates = mapSearchCandidates(
+      await this.fetchBackendJson(`${SWDC_SERVICE_PATH}/SearchResultSet`, token, buildSearchParams(input, language))
+    );
+    const match = pickCandidate(candidates, input);
+    if (match) return match.objectKey;
+
+    if (candidates.length === 0) {
+      throw new Error(`No download object found for "${input}" in SAP Software Download Center search. Check the spelling, or pass the numeric key at the end of the package’s SAP for Me /softwarecenter/object/ URL.`);
+    }
+    const list = candidates.slice(0, 10).map(c => `${c.name} (${c.description}, ${c.type}, key ${c.objectKey})`).join('; ');
+    throw new Error(`No unique exact match for "${input}". Candidates: ${list}. Pass the exact package name or the object key.`);
+  }
+
+  /**
+   * Content of a support package as shown in SAP for Me → Software Downloads → package details:
+   * delivered SAP Notes, side-effect solutions, import conditions and object list.
+   */
+  async getSupportPackageContent(
+    nameOrKey: string,
+    token: string,
+    options: {
+      include?: SupportPackageSection[];
+      component?: string;
+      maxNotes?: number;
+      maxObjects?: number;
+      language?: string;
+    } = {}
+  ): Promise<SupportPackageContent> {
+    const include = new Set<SupportPackageSection>(options.include?.length ? options.include : ['notes']);
+    const maxNotes = options.maxNotes ?? DEFAULT_MAX_NOTES;
+    const maxObjects = options.maxObjects ?? 300;
+    const language = options.language;
+
+    const objectKey = await this.resolveSupportPackage(nameOrKey, token, language);
+    const header = mapHeader(
+      await this.fetchBackendJson(objectPath(objectKey), token, language ? { $format: 'json', 'sap-language': language } : { $format: 'json' }),
+      objectKey
+    );
+
+    const content: SupportPackageContent = {
+      package: header,
+      url: `https://me.sap.com/softwarecenter/object/${objectKey}`
+    };
+    const truncated: SupportPackageContent['truncated'] = {};
+
+    if (include.has('notes')) {
+      const scanLimit = options.component?.trim() ? MAX_PACKAGE_NOTES : maxNotes;
+      const { rows, count, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.notes, token, scanLimit, language);
+      const all = rows.map(mapNote).sort((a, b) =>
+        a.component.localeCompare(b.component) || a.id.localeCompare(b.id, undefined, { numeric: true }));
+      if (count !== null) content.noteCount = count;
+      const matches = filterNotesByComponent(all, options.component);
+      content.notes = matches.slice(0, maxNotes);
+      content.notesByComponent = summarizeByComponent(content.notes);
+      if (partial || matches.length > maxNotes) truncated.notes = true;
+    }
+    if (include.has('sideEffects')) {
+      const { rows, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.sideEffects, token, 2000, language);
+      content.sideEffects = rows.map(mapSideEffect);
+      if (partial) truncated.sideEffects = true;
+    }
+    if (include.has('conditions')) {
+      const { rows, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.conditions, token, 500, language);
+      content.conditions = rows.map(mapCondition);
+      if (partial) truncated.conditions = true;
+    }
+    if (include.has('objects')) {
+      const { rows, count, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.objects, token, maxObjects, language);
+      content.objects = rows.map(mapObject);
+      if (count !== null) content.objectCount = count;
+      if (partial) truncated.objects = true;
+    }
+    if (Object.keys(truncated).length) content.truncated = truncated;
+
+    logger.info(`✅ Retrieved support package ${header.name}: ${content.notes?.length ?? 0} returned note(s)`);
+    return content;
   }
 
   /**
@@ -2105,6 +2237,18 @@ export class SapNotesApiClient {
    * Shared by Coveo token Playwright fallback and note retrieval.
    */
   private async ensurePersistentBrowser(token: string): Promise<void> {
+    if (this.browserInitPromise) return this.browserInitPromise;
+
+    // Share the whole initialization, including idle teardown and context setup.
+    this.browserInitPromise = this.initializePersistentBrowser(token);
+    try {
+      await this.browserInitPromise;
+    } finally {
+      this.browserInitPromise = null;
+    }
+  }
+
+  private async initializePersistentBrowser(token: string): Promise<void> {
     const now = Date.now();
 
     // Close idle browser

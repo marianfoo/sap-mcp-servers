@@ -33,7 +33,7 @@ test('initializes and lists Notes tools through the authenticated HTTP endpoint'
     }));
     assert.equal(client.getServerVersion()?.name, 'sap-note-search-mcp');
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map(({ name }) => name), ['search', 'fetch']);
+    assert.deepEqual(tools.map(({ name }) => name), ['search', 'fetch', 'support_package_notes']);
   } finally {
     await client.close();
   }
