@@ -10,7 +10,6 @@ export {
   parseApprouterPage,
   parseAutoPostForm,
   readAll,
-  SAP_LOGIN_HOSTS,
   type ApprouterLoginOptions,
   type ApprouterPage,
   type AutoPostForm,

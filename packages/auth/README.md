@@ -209,10 +209,7 @@ if (String(res.headers['content-type']).includes('html') && await client.approut
 }
 ```
 
-It returns false for any other page, and it refuses a step to a host outside `allowedHosts`
-(default `SAP_LOGIN_HOSTS`: `*.ondemand.com` and `*.sap.com`), because the client presents the
-certificate on every request. On the way it reads only HTML pages, so the resource the app
-redirects back to is not downloaded twice. `parseApprouterPage` and `metaRedirect` are exported too.
+Set `trustedOrigins` on the client to the exact HTTPS origins for your BTP app, XSUAA tenant and identity provider. The built-in origins are `https://accounts.sap.com`, `https://launchpad.support.sap.com` and `https://softwaredownloads.sap.com`. Every network request, including redirects and SAML form submissions, checks this list before presenting the client certificate. Use explicit tenant URLs. A successful approuter walk returns to the application origin; retry the resource there to confirm access.
 
 ## Security
 

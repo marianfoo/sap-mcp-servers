@@ -1,4 +1,5 @@
 import https from 'https';
+import { CookieJar as HttpCookieJar } from 'tough-cookie';
 import type { IncomingHttpHeaders } from 'http';
 import { Readable } from 'stream';
 import type { Logger } from './types.js';
@@ -40,6 +41,8 @@ export interface CertHttpsClientOptions {
   maxFormSteps?: number;
   /** Socket idle timeout in ms. Default 120000. */
   timeoutMs?: number;
+  /** Additional trusted HTTPS origins, including the specific BTP app and identity provider. */
+  trustedOrigins?: readonly string[];
   transport?: Transport;
 }
 
@@ -76,97 +79,16 @@ export interface AutoPostForm {
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const MAX_HTML = 2 * 1024 * 1024;
 
-interface StoredCookie {
-  name: string;
-  value: string;
-  domain: string;
-  hostOnly: boolean;
-  path: string;
-  expires?: number;
-}
-
-/** A cookie jar with Domain, Path and expiry handling, enough for the SAML chains. */
+/** Cookies follow RFC domain/path and public-suffix rules. */
 export class CookieJar {
-  private cookies = new Map<string, StoredCookie>();
-
-  get size(): number {
-    return this.cookies.size;
-  }
-
-  clear(): void {
-    this.cookies.clear();
-  }
-
-  store(url: URL, setCookie: string | string[] | undefined, now = Date.now()): void {
-    for (const line of ([] as string[]).concat(setCookie ?? [])) {
-      const [pair, ...attrs] = line.split(';');
-      const eq = pair.indexOf('=');
-      if (eq <= 0) continue;
-      const cookie: StoredCookie = {
-        name: pair.slice(0, eq).trim(),
-        value: pair.slice(eq + 1).trim(),
-        domain: url.hostname.toLowerCase(),
-        hostOnly: true,
-        path: defaultPath(url.pathname)
-      };
-      let maxAge: number | undefined;
-      for (const attr of attrs) {
-        const i = attr.indexOf('=');
-        const key = (i < 0 ? attr : attr.slice(0, i)).trim().toLowerCase();
-        const val = i < 0 ? '' : attr.slice(i + 1).trim();
-        if (key === 'domain' && val) {
-          const domain = val.replace(/^\./, '').toLowerCase();
-          if (!domainMatch(url.hostname.toLowerCase(), domain)) cookie.domain = '';
-          else {
-            cookie.domain = domain;
-            cookie.hostOnly = false;
-          }
-        } else if (key === 'path' && val.startsWith('/')) cookie.path = val;
-        else if (key === 'max-age' && /^-?\d+$/.test(val)) maxAge = Number(val);
-        else if (key === 'expires') {
-          const t = Date.parse(val);
-          if (!Number.isNaN(t)) cookie.expires = t;
-        }
-      }
-      if (!cookie.domain) continue;
-      if (maxAge !== undefined) cookie.expires = now + maxAge * 1000;
-      const id = `${cookie.domain}|${cookie.path}|${cookie.name}`;
-      if (cookie.expires !== undefined && cookie.expires <= now) this.cookies.delete(id);
-      else this.cookies.set(id, cookie);
+  private readonly cookies = new HttpCookieJar();
+  store(url: URL, values: string | string[] | undefined): void {
+    for (const value of ([] as string[]).concat(values ?? [])) {
+      this.cookies.setCookieSync(value, url.href, { ignoreError: true });
     }
   }
-
-  header(url: URL, now = Date.now()): string {
-    const host = url.hostname.toLowerCase();
-    const out: StoredCookie[] = [];
-    for (const [id, c] of this.cookies) {
-      if (c.expires !== undefined && c.expires <= now) {
-        this.cookies.delete(id);
-        continue;
-      }
-      if (c.hostOnly ? host !== c.domain : !domainMatch(host, c.domain)) continue;
-      if (!pathMatch(url.pathname || '/', c.path)) continue;
-      out.push(c);
-    }
-    out.sort((a, b) => b.path.length - a.path.length);
-    return out.map(c => `${c.name}=${c.value}`).join('; ');
-  }
-}
-
-function domainMatch(host: string, domain: string): boolean {
-  return host === domain || host.endsWith(`.${domain}`);
-}
-
-function pathMatch(requestPath: string, cookiePath: string): boolean {
-  if (requestPath === cookiePath) return true;
-  if (!requestPath.startsWith(cookiePath)) return false;
-  return cookiePath.endsWith('/') || requestPath[cookiePath.length] === '/';
-}
-
-function defaultPath(pathname: string): string {
-  if (!pathname.startsWith('/')) return '/';
-  const i = pathname.lastIndexOf('/');
-  return i <= 0 ? '/' : pathname.slice(0, i);
+  header(url: URL): string { return this.cookies.getCookieStringSync(url.href); }
+  clear(): void { this.cookies.removeAllCookiesSync(); }
 }
 
 function decodeEntities(s: string): string {
@@ -209,7 +131,7 @@ export function parseAutoPostForm(html: string): AutoPostForm | null {
     if (name) fields.push([name, a.get('value') ?? '']);
   }
   if (/<(textarea|select)\b/i.test(form[2])) return null;
-  if (!fields.length) return null;
+  if (!fields.some(([name]) => name === 'SAMLRequest' || name === 'SAMLResponse')) return null;
   return { action, method: (formAttrs.get('method') ?? 'post').toUpperCase(), fields };
 }
 
@@ -244,12 +166,9 @@ function jsUnescape(s: string): string {
     .replace(/\\\//g, '/');
 }
 
-/** Hosts an approuter login may go to by default: SAP BTP and SAP. */
-export const SAP_LOGIN_HOSTS: readonly RegExp[] = [/\.ondemand\.com$/i, /(^|\.)sap\.com$/i];
+const SAP_ORIGINS = ['https://accounts.sap.com', 'https://softwaredownloads.sap.com', 'https://launchpad.support.sap.com'];
 
 export interface ApprouterLoginOptions {
-  /** Hosts the login may be sent to. The client presents the certificate to each one. Default SAP_LOGIN_HOSTS. */
-  allowedHosts?: readonly RegExp[];
   /** Meta redirects followed after the authorize URL. Default 4. */
   maxMetaSteps?: number;
 }
@@ -301,6 +220,7 @@ function httpsTransport(options: CertHttpsClientOptions): Transport {
 
 export class CertHttpsClient {
   readonly jar = new CookieJar();
+  private readonly trustedOrigins: Set<string>;
   private transport: Transport;
   private logger?: Logger;
   private userAgent: string;
@@ -308,6 +228,7 @@ export class CertHttpsClient {
   private maxFormSteps: number;
 
   constructor(options: CertHttpsClientOptions) {
+    this.trustedOrigins = new Set([...SAP_ORIGINS, ...(options.trustedOrigins ?? [])].map(value => new URL(value).origin));
     this.transport = options.transport ?? httpsTransport(options);
     this.logger = options.logger;
     this.userAgent = options.userAgent ?? 'Mozilla/5.0 (sap-mcp cert-client)';
@@ -355,34 +276,33 @@ export class CertHttpsClient {
   async approuterLogin(target: string, page: string, options: ApprouterLoginOptions = {}): Promise<boolean> {
     const app = parseApprouterPage(page);
     if (!app) return false;
-    const allowed = options.allowedHosts ?? SAP_LOGIN_HOSTS;
-    const check = (url: URL): URL => {
-      if (url.protocol !== 'https:' || !allowed.some(re => re.test(url.hostname))) {
-        throw new Error(`Refusing to send the client certificate to ${url.protocol}//${url.host} during an approuter login`);
-      }
-      return url;
-    };
     const resource = new URL(target);
+    this.checkOrigin(resource);
     const origin = new URL('/', resource);
     this.jar.store(origin, [
       'fragmentAfterLogin=; Path=/',
       `locationAfterLogin=${encodeURIComponent(resource.pathname + resource.search)}; Path=/`,
       ...app.cookies.map(([name, value]) => `${name}=${value}; Path=/`)
     ]);
-    let next = check(new URL(app.location, origin));
+    let next = new URL(app.location, origin);
     for (let step = 0; step < (options.maxMetaSteps ?? 4); step++) {
       // The last redirect leads back to the resource, which can be large: read only HTML pages.
       const res = await this.open(next.toString(), { headers: { Accept: 'text/html' } });
       this.logger?.info(`Approuter login step ${step + 1}: ${res.hops.join(' | ')}`);
+      if (res.status < 200 || res.status >= 300) {
+        res.body.destroy();
+        return false;
+      }
+      const returnedToApp = new URL(res.url).origin === resource.origin;
       if (!isHtml(res.headers)) {
         res.body.destroy();
-        return true;
+        return returnedToApp;
       }
       const meta = metaRedirect((await readAll(res.body, MAX_HTML)).toString('utf8'));
-      if (!meta) return true;
-      next = check(new URL(meta, res.url));
+      if (!meta) return returnedToApp;
+      next = new URL(meta, res.url);
     }
-    return true;
+    return false;
   }
 
   /** open(), with the body read into memory. For pages and JSON, not for downloads. */
@@ -391,12 +311,20 @@ export class CertHttpsClient {
     return { ...res, body: await readAll(res.body, maxBytes) };
   }
 
+  private checkOrigin(url: URL): void {
+    if (url.protocol !== 'https:') throw new Error(`Refusing a non-HTTPS URL: ${url.origin}`);
+    if (!this.trustedOrigins.has(url.origin) || url.username || url.password) {
+      throw new Error(`Refusing to send the client certificate to ${url.origin}`);
+    }
+  }
+
   private async follow(url: URL, options: RequestOptions, hops: string[]): Promise<CertResponse> {
+    let requestHeaders = options.headers;
     let method = (options.method ?? 'GET').toUpperCase();
     let body = typeof options.body === 'string' ? Buffer.from(options.body) : options.body;
     for (let n = 0; ; n++) {
-      if (url.protocol !== 'https:') throw new Error(`Refusing a non-HTTPS URL: ${url.protocol}//${url.host}`);
-      const headers: Record<string, string> = { 'User-Agent': this.userAgent, Accept: '*/*', ...(options.headers ?? {}) };
+      this.checkOrigin(url);
+      const headers: Record<string, string> = { 'User-Agent': this.userAgent, Accept: '*/*', ...requestHeaders };
       const cookie = this.jar.header(url);
       if (cookie) headers.Cookie = cookie;
       if (body) {
@@ -412,7 +340,9 @@ export class CertHttpsClient {
       if (!REDIRECTS.has(res.status) || !location) return { status: res.status, headers: res.headers, body: res.body, url: url.toString(), hops };
       await drain(res.body);
       if (n >= this.maxRedirects) throw new Error(`Too many redirects, last at ${url.host}${url.pathname}`);
-      url = new URL(location, url);
+      const next = new URL(location, url);
+      if (next.origin !== url.origin) requestHeaders = undefined;
+      url = next;
       if (res.status !== 307 && res.status !== 308) {
         method = 'GET';
         body = undefined;

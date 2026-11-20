@@ -2,6 +2,9 @@ import { Readable } from 'stream';
 import { describe, expect, it } from 'vitest';
 import { CertHttpsClient, CookieJar, metaRedirect, parseApprouterPage, parseAutoPostForm, readAll, type Transport, type TransportRequest } from '../src/cert-client.js';
 
+const TEST_ORIGINS = ['https://a.sap.com','https://b.sap.com','https://app.cfapps.eu10.hana.ondemand.com',
+  'https://tenant.authentication.eu10.hana.ondemand.com','https://idp.accounts.ondemand.com'];
+
 const SAML_PAGE = (action: string, fields: Record<string, string>) => `<!DOCTYPE html><html><body onload="document.forms[0].submit()">
 <form method="post" action="${action}">${Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${k}" value="${v}"/>`).join('')}
 <noscript><input type="submit" value="Continue"/></noscript></form></body></html>`;
@@ -13,8 +16,8 @@ describe('parseAutoPostForm', () => {
   });
 
   it('accepts value before name and single quotes', () => {
-    const form = parseAutoPostForm(`<form action='/acs'><input value='v1' type='hidden' name='a'></form>`);
-    expect(form?.fields).toEqual([['a', 'v1']]);
+    const form = parseAutoPostForm(`<form action='/acs'><input value='v1' type='hidden' name='SAMLRequest'></form>`);
+    expect(form?.fields).toEqual([['SAMLRequest', 'v1']]);
   });
 
   it('refuses a page with a visible field, such as a login form', () => {
@@ -45,7 +48,7 @@ describe('CookieJar', () => {
     expect(jar.header(url)).toBe('P=1');
     expect(jar.header(new URL('https://launchpad.support.sap.com/other'))).toBe('');
     jar.store(url, ['P=1; Path=/services; Max-Age=0']);
-    expect(jar.size).toBe(0);
+    expect(jar.header(url)).toBe('');
   });
 });
 
@@ -70,7 +73,7 @@ describe('CertHttpsClient', () => {
       () => ({ status: 302, headers: { location: '/', 'set-cookie': 'SESSION=3; Path=/' } }),
       () => ({ status: 200, headers: { 'content-type': 'application/octet-stream' }, body: 'CAR 2.01...' })
     ]);
-    const client = new CertHttpsClient({ pfx: Buffer.alloc(0), transport });
+    const client = new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport });
     const res = await client.open('https://softwaredownloads.sap.com/file/123');
     expect(res.status).toBe(200);
     expect(res.url).toBe('https://softwaredownloads.sap.com/');
@@ -91,23 +94,23 @@ describe('CertHttpsClient', () => {
 
   it('stops at an HTML page that is not an auto-submit form and returns it', async () => {
     const { transport } = scripted([() => ({ status: 200, headers: { 'content-type': 'text/html' }, body: '<form action="/l"><input type="password" name="p"></form>' })]);
-    const res = await new CertHttpsClient({ pfx: Buffer.alloc(0), transport }).fetch('https://accounts.sap.com/');
+    const res = await new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport }).fetch('https://accounts.sap.com/');
     expect(res.body.toString()).toContain('password');
   });
 
   it('refuses plain HTTP, also after a redirect', async () => {
     const { transport } = scripted([() => ({ status: 302, headers: { location: 'http://evil.example/' } })]);
-    await expect(new CertHttpsClient({ pfx: Buffer.alloc(0), transport }).fetch('https://a.sap.com/')).rejects.toThrow(/non-HTTPS/);
+    await expect(new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport }).fetch('https://a.sap.com/')).rejects.toThrow(/non-HTTPS/);
   });
 
   it('limits redirects and form steps', async () => {
     const loop = () => ({ status: 302, headers: { location: '/again' } });
     const { transport } = scripted(Array.from({ length: 20 }, () => loop));
-    await expect(new CertHttpsClient({ pfx: Buffer.alloc(0), transport, maxRedirects: 3 }).fetch('https://a.sap.com/')).rejects.toThrow(/Too many redirects/);
+    await expect(new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport, maxRedirects: 3 }).fetch('https://a.sap.com/')).rejects.toThrow(/Too many redirects/);
 
-    const page = () => ({ status: 200, headers: { 'content-type': 'text/html' }, body: SAML_PAGE('/again', { a: '1' }) });
+    const page = () => ({ status: 200, headers: { 'content-type': 'text/html' }, body: SAML_PAGE('/again', { SAMLRequest: '1' }) });
     const forms = scripted(Array.from({ length: 10 }, () => page));
-    const res = await new CertHttpsClient({ pfx: Buffer.alloc(0), transport: forms.transport, maxFormSteps: 2 }).fetch('https://a.sap.com/');
+    const res = await new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport: forms.transport, maxFormSteps: 2 }).fetch('https://a.sap.com/');
     expect(res.hops).toHaveLength(3);
   });
 
@@ -119,7 +122,7 @@ describe('CertHttpsClient', () => {
       () => ({ status: 200, headers: { 'content-type': 'text/html' }, body: SAML_PAGE('https://b.sap.com/acs', { SAMLResponse: 'SECRET2' }) }),
       () => ({ status: 200, headers: { 'content-type': 'application/json' }, body: '{}' })
     ]);
-    await new CertHttpsClient({ pfx: Buffer.alloc(0), transport, logger: { info: log, debug: log, warn: log, error: log } }).fetch('https://a.sap.com/x?token=SECRET0');
+    await new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport, logger: { info: log, debug: log, warn: log, error: log } }).fetch('https://a.sap.com/x?token=SECRET0');
     expect(lines.join('\n')).not.toMatch(/SECRET/);
     expect(lines).toContain('SAML form step 1: POST b.sap.com/acs (1 field(s))');
   });
@@ -129,7 +132,7 @@ describe('CertHttpsClient', () => {
       () => ({ status: 200, headers: { 'set-cookie': 'S=1' } }),
       () => ({ status: 200 })
     ]);
-    const client = new CertHttpsClient({ pfx: Buffer.alloc(0), transport });
+    const client = new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport });
     await client.fetch('https://a.sap.com/');
     client.reset();
     await client.fetch('https://a.sap.com/');
@@ -162,7 +165,7 @@ describe('approuter login', () => {
       () => ({ status: 302, headers: { location: RESOURCE, 'set-cookie': 'JSESSIONID=ok; Path=/' } }),
       () => ({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"d":{}}' })
     ]);
-    const client = new CertHttpsClient({ pfx: Buffer.alloc(0), transport });
+    const client = new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport });
     expect(await client.approuterLogin(RESOURCE, APPROUTER_PAGE)).toBe(true);
     expect(seen[0].url.toString()).toBe(`${XSUAA}/oauth/authorize?response_type=code&client_id=c&state=s`);
     const callback = seen.find(s => s.url.pathname === '/login/callback')!;
@@ -178,34 +181,46 @@ describe('approuter login', () => {
       () => ({ status: 302, headers: { location: RESOURCE, 'set-cookie': 'JSESSIONID=ok; Path=/' } }),
       () => ({ status: 200, headers: { 'content-type': 'application/json' }, body: big })
     ]);
-    const client = new CertHttpsClient({ pfx: Buffer.alloc(0), transport });
+    const client = new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport });
     expect(await client.approuterLogin(RESOURCE, APPROUTER_PAGE)).toBe(true);
     expect(client.jar.header(new URL(RESOURCE))).toContain('JSESSIONID=ok');
   });
 
   it('returns false for a page that is not an approuter page, and sends nothing', async () => {
     const { transport, seen } = scripted([]);
-    expect(await new CertHttpsClient({ pfx: Buffer.alloc(0), transport }).approuterLogin(RESOURCE, '<html>maintenance</html>')).toBe(false);
+    expect(await new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport }).approuterLogin(RESOURCE, '<html>maintenance</html>')).toBe(false);
     expect(seen).toHaveLength(0);
   });
 
   it('refuses to send the certificate to a host outside the allowed ones', async () => {
     const evil = APPROUTER_PAGE.replace(XSUAA, 'https://evil.example.com');
     const { transport, seen } = scripted([]);
-    await expect(new CertHttpsClient({ pfx: Buffer.alloc(0), transport }).approuterLogin(RESOURCE, evil)).rejects.toThrow(/Refusing to send the client certificate to https:\/\/evil\.example\.com/);
+    await expect(new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport }).approuterLogin(RESOURCE, evil)).rejects.toThrow(/Refusing to send the client certificate to https:\/\/evil\.example\.com/);
     expect(seen).toHaveLength(0);
 
     const idp = scripted([
       () => ({ status: 302, headers: { location: `${XSUAA}/login` } }),
       () => ({ status: 200, headers: { 'content-type': 'text/html' }, body: xsuaaLogin('https://evil.example.com') })
     ]);
-    await expect(new CertHttpsClient({ pfx: Buffer.alloc(0), transport: idp.transport }).approuterLogin(RESOURCE, APPROUTER_PAGE)).rejects.toThrow(/evil\.example\.com/);
+    await expect(new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport: idp.transport }).approuterLogin(RESOURCE, APPROUTER_PAGE)).rejects.toThrow(/evil\.example\.com/);
     expect(idp.seen).toHaveLength(2);
   });
 
-  it('takes its own host list', async () => {
+  it('requires explicit trust for tenant origins', async () => {
     const { transport } = scripted([() => ({ status: 200, headers: { 'content-type': 'application/json' }, body: '{}' })]);
+    const client = new CertHttpsClient({ pfx: Buffer.alloc(0),  transport });
+    await expect(client.approuterLogin(RESOURCE, APPROUTER_PAGE)).rejects.toThrow(/Refusing/);
+  });
+});
+
+describe('trusted destinations', () => {
+  it.each([
+    { status: 302, headers: { location: 'https://unlisted.example/next' } },
+    { status: 200, headers: { 'content-type': 'text/html' }, body: SAML_PAGE('https://unlisted.example/next', { SAMLRequest: 'fixture' }) }
+  ])('checks a new origin before passing a request to the transport', async response => {
+    const { transport, seen } = scripted([() => response]);
     const client = new CertHttpsClient({ pfx: Buffer.alloc(0), transport });
-    await expect(client.approuterLogin(RESOURCE, APPROUTER_PAGE, { allowedHosts: [/^only\.example$/] })).rejects.toThrow(/Refusing/);
+    await expect(client.fetch('https://accounts.sap.com/')).rejects.toThrow(/Refusing/);
+    expect(seen).toHaveLength(1);
   });
 });
