@@ -1,6 +1,6 @@
 {
   "name": "sap-note-search-mcp",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "MCP server for searching SAP Notes/KB articles using SAP Passport authentication and Playwright automation",
   "main": "dist/mcp-server.js",
   "bin": {
@@ -59,7 +59,7 @@
     "url": "https://github.com/marianfoo/sap-mcp-servers/issues"
   },
   "dependencies": {
-    "@marianfoo/sap-mcp-auth": "^0.1.3",
+    "@marianfoo/sap-mcp-auth": "^0.1.4",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "cors": "^2.8.5",
     "dotenv": "^18.0.10",

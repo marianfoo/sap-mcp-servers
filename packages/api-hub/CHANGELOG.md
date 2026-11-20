@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/marianfoo/sap-mcp-servers/compare/sap-api-hub-mcp-v0.1.5...sap-api-hub-mcp-v0.1.6) (2026-11-20)
+
+
+### Bug Fixes
+
+* **auth:** complete interactive sign-in at the target SAP service ([#106](https://github.com/marianfoo/sap-mcp-servers/issues/106)) ([58e4804](https://github.com/marianfoo/sap-mcp-servers/commit/58e48040dd2efae04ff5a32d5a51ff2eb3ba78b6))
+
 ## [0.1.5](https://github.com/marianfoo/sap-mcp-servers/compare/sap-api-hub-mcp-v0.1.4...sap-api-hub-mcp-v0.1.5) (2026-10-17)
 
 

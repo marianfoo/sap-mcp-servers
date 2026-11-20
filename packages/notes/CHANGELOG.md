@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.11](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.10...sap-note-search-mcp-v0.3.11) (2026-11-20)
+
+
+### Features
+
+* **notes:** add support_package_notes tool for SAP Support Package content ([#105](https://github.com/marianfoo/sap-mcp-servers/issues/105)) ([d0f4d21](https://github.com/marianfoo/sap-mcp-servers/commit/d0f4d21c752919af0f92c67becaf0dbd3ef7263d))
+
+
+### Bug Fixes
+
+* **notes:** deduplicate concurrent browser initialization ([#94](https://github.com/marianfoo/sap-mcp-servers/issues/94)) ([40047a2](https://github.com/marianfoo/sap-mcp-servers/commit/40047a21c205bc58563242a8717bd3174c4df794))
+
 ## [0.3.10](https://github.com/marianfoo/sap-mcp-servers/compare/sap-note-search-mcp-v0.3.9...sap-note-search-mcp-v0.3.10) (2026-10-17)
 
 
