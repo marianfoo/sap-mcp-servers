@@ -6,7 +6,7 @@ import { SapNotesApiClient } from '../dist/sap-notes-api.js';
 function fixture(t) {
   const client = new SapNotesApiClient({ headful: false });
   client.buildStorageStateFromTokenCache = async () => undefined;
-  const context = {};
+  const context = { close: async () => {} };
   const browser = {
     isConnected: () => true,
     newContext: async () => context,
@@ -19,13 +19,14 @@ function fixture(t) {
 for (const state of ['cold', 'idle']) {
   test(`concurrent ${state} browser initialization shares one launch and context`, async t => {
     const { client, browser, context } = fixture(t);
+    const newContext = t.mock.method(browser, 'newContext');
     let oldBrowserCloses = 0;
     if (state === 'idle') {
       client.browser = {
         isConnected: () => true,
         close: async () => { oldBrowserCloses++; }
       };
-      client.browserContext = {};
+      client.browserContext = { close: async () => {} };
       client.browserLastUsed = Date.now() - 6 * 60 * 1000;
     }
     let release;
@@ -41,11 +42,15 @@ for (const state of ['cold', 'idle']) {
     await Promise.all([first, second]);
 
     assert.equal(launch.mock.callCount(), 1);
+    assert.equal(newContext.mock.callCount(), 1);
     assert.equal(oldBrowserCloses, state === 'idle' ? 1 : 0);
     assert.equal(client.browser, browser);
     assert.equal(client.browserContext, context);
     await client.ensurePersistentBrowser('synthetic');
     assert.equal(launch.mock.callCount(), 1, 'a ready browser remains reusable');
+    client.browserLastUsed = Date.now() - 6 * 60 * 1000;
+    await client.ensurePersistentBrowser('synthetic');
+    assert.equal(launch.mock.callCount(), 2, 'a successful init allows a later idle restart');
   });
 }
 
@@ -55,11 +60,11 @@ test('a caller arriving during context setup waits for that context', async t =>
   const gate = new Promise(resolve => { releaseContext = resolve; });
   let contextStarted;
   const started = new Promise(resolve => { contextStarted = resolve; });
-  browser.newContext = async () => {
+  const newContext = t.mock.method(browser, 'newContext', async () => {
     contextStarted();
     await gate;
     return context;
-  };
+  });
   const launch = t.mock.method(chromium, 'launch', async () => browser);
 
   const first = client.ensurePersistentBrowser('synthetic');
@@ -69,6 +74,7 @@ test('a caller arriving during context setup waits for that context', async t =>
   });
   releaseContext();
   await Promise.all([first, second]);
+  assert.equal(newContext.mock.callCount(), 1);
   assert.equal(launch.mock.callCount(), 1);
 });
 
