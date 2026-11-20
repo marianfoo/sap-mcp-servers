@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SapNotesApiClient } from './sap-notes-api.js';
-import { formatSupportPackageContent } from './support-package-backend.js';
+import { DEFAULT_MAX_NOTES, MAX_PACKAGE_NOTES, formatSupportPackageContent } from './support-package-backend.js';
 import { logger } from './logger.js';
 
 const JSON_SCHEMA_2020_12 = 'https://json-schema.org/draft/2020-12/schema';
@@ -18,6 +18,7 @@ Tip: use 'component' to narrow large packages (e.g. "PY-DE" for German payroll, 
 export const SupportPackageInputSchema = {
   package: z
     .string()
+    .trim()
     .min(4)
     .max(40)
     .regex(/^[A-Za-z0-9_\-\/]+$/, 'Package name may only contain letters, digits, _, - and /')
@@ -35,9 +36,9 @@ export const SupportPackageInputSchema = {
     .number()
     .int()
     .min(1)
-    .max(5000)
-    .default(2000)
-    .describe('Upper bound for notes loaded (default 2000).'),
+    .max(MAX_PACKAGE_NOTES)
+    .default(DEFAULT_MAX_NOTES)
+    .describe('Maximum matching notes to return (default 100). Component searches scan up to 5000 notes.'),
   maxObjects: z
     .number()
     .int()
@@ -68,7 +69,7 @@ export function registerSupportPackageTool(
       inputSchema: SupportPackageInputMcpSchema,
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
-    async ({ package: pkg, include = ['notes'], component, maxNotes = 2000, maxObjects = 300, lang = 'EN' }) => {
+    async ({ package: pkg, include, component, maxNotes, maxObjects, lang }) => {
       logger.info(`📦 [${SUPPORT_PACKAGE_TOOL_NAME}] ${pkg} include=${include.join(',')} component=${component ?? '-'}`);
       try {
         const content = await withAuthRetry(token =>

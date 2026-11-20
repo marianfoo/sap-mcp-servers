@@ -102,10 +102,10 @@ test('formatter renders header, notes and truncation hint', () => {
   assert.match(text, /SAPKE608G4 — SAP_HR 608: SP 0164/);
   assert.match(text, /462 in package, 1 matching component "BC"/);
   assert.match(text, /- 3758752 v3 \[BC-BMT-OM\] PPOME/);
-  assert.match(text, /truncated/);
+  assert.match(text, /partial list/);
 });
 
-test('an omitted total and a component beyond the fetch limit are reported as partial', async () => {
+test('an omitted total is reported honestly and a component beyond the output limit is still found', async () => {
   const { SapNotesApiClient } = await import('../dist/sap-notes-api.js');
   const client = Object.create(SapNotesApiClient.prototype);
   const key = '0010000001004222026';
@@ -113,12 +113,12 @@ test('an omitted total and a component beyond the fetch limit are reported as pa
   client.fetchBackendJson = async (path, token, params) => path.endsWith('/ObjectSAPNotes')
     ? { d: { results: input.slice(+params.$skip, +params.$skip + +params.$top) } }
     : { d: { Title: 'Package' } };
-  const partial = await client.getSupportPackageContent(key, 'test', { component: 'PY', maxNotes: 1 });
-  assert.deepEqual(partial.notes, []);
+  const partial = await client.getSupportPackageContent(key, 'test', { maxNotes: 1 });
+  assert.equal(partial.notes.length, 1);
   assert.equal(partial.truncated.notes, true);
   assert.equal(partial.noteCount, undefined);
   assert.match(formatSupportPackageContent(partial, 'PY'), /total unknown/);
-  const full = await client.getSupportPackageContent(key, 'test', { component: 'PY', maxNotes: 2 });
+  const full = await client.getSupportPackageContent(key, 'test', { component: 'PY', maxNotes: 1 });
   assert.equal(full.noteCount, 2);
   assert.equal(full.notes.length, 1);
   assert.equal(full.truncated, undefined);
@@ -143,4 +143,30 @@ test('paged collections respect the reported count, the caller limit, and short 
     assert.equal(result.truncated, limit < 1200);
     assert.equal(result.count, counted ? 1200 : null);
   }
+});
+
+test('component filters follow SAP hierarchy boundaries', () => {
+  const notes = ['FI', 'FI-GL', 'FIN-FSCM'].map(Component => mapNote({ Component }));
+  assert.deepEqual(filterNotesByComponent(notes, 'fi').map(n => n.component), ['FI', 'FI-GL']);
+});
+
+test('package names resolve through search before fetching the selected object', async () => {
+  const { SapNotesApiClient } = await import('../dist/sap-notes-api.js');
+  const client = Object.create(SapNotesApiClient.prototype);
+  const key = '0010000001004222026';
+  let candidates = [{ Title: 'SAPKE608G4', Fastkey: key }];
+  client.fetchBackendJson = async (path, _token, params) => {
+    if (path.endsWith('/SearchResultSet')) {
+      assert.equal(params.SEARCH_STRING, 'SAPKE608G4');
+      return { d: { results: candidates } };
+    }
+    assert.ok(path.includes(key));
+    return path.endsWith('/ObjectSAPNotes') ? { d: { results: [] } } : { d: { FileName: 'SAPKE608G4' } };
+  };
+  assert.equal((await client.getSupportPackageContent(' sapke608g4 ', 'test')).package.objectKey, key);
+  candidates = [...candidates, { Title: 'SAPKE608G4', Fastkey: '0010000001004222027' }];
+  await assert.rejects(client.resolveSupportPackage('SAPKE608G4','test'), /No unique exact match/);
+  candidates = [];
+  await assert.rejects(client.resolveSupportPackage('SAPKE608G4','test'), /softwarecenter\/object/);
+  assert.throws(() => mapHeader({ d: {} }, key), /package header/);
 });

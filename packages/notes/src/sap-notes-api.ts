@@ -24,7 +24,7 @@ import {
 } from './sap-notes-backend.js';
 import {
   SECTION_NAVIGATION,
-  SWDC_PAGE_SIZE,
+  DEFAULT_MAX_NOTES, MAX_PACKAGE_NOTES, SWDC_PAGE_SIZE,
   SWDC_SERVICE_PATH,
   buildPageParams,
   buildSearchParams,
@@ -426,6 +426,7 @@ export class SapNotesApiClient {
       ));
       count ??= page.count;
       for (const row of page.rows) rows.push(row);
+      if (count !== null && count < rows.length) count = null;
       if (page.rows.length === 0 || (count !== null && rows.length >= Math.min(limit, count))) break;
       if (count === null && page.rows.length < top && !page.hasNext) break;
     }
@@ -467,7 +468,7 @@ export class SapNotesApiClient {
     } = {}
   ): Promise<SupportPackageContent> {
     const include = new Set<SupportPackageSection>(options.include?.length ? options.include : ['notes']);
-    const maxNotes = options.maxNotes ?? 2000;
+    const maxNotes = options.maxNotes ?? DEFAULT_MAX_NOTES;
     const maxObjects = options.maxObjects ?? 300;
     const language = options.language;
 
@@ -484,13 +485,15 @@ export class SapNotesApiClient {
     const truncated: SupportPackageContent['truncated'] = {};
 
     if (include.has('notes')) {
-      const { rows, count, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.notes, token, maxNotes, language);
+      const scanLimit = options.component?.trim() ? MAX_PACKAGE_NOTES : maxNotes;
+      const { rows, count, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.notes, token, scanLimit, language);
       const all = rows.map(mapNote).sort((a, b) =>
         a.component.localeCompare(b.component) || a.id.localeCompare(b.id, undefined, { numeric: true }));
       if (count !== null) content.noteCount = count;
-      content.notes = filterNotesByComponent(all, options.component);
+      const matches = filterNotesByComponent(all, options.component);
+      content.notes = matches.slice(0, maxNotes);
       content.notesByComponent = summarizeByComponent(content.notes);
-      if (partial) truncated.notes = true;
+      if (partial || matches.length > maxNotes) truncated.notes = true;
     }
     if (include.has('sideEffects')) {
       const { rows, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.sideEffects, token, 2000, language);

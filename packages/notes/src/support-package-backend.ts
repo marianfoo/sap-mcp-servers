@@ -15,6 +15,8 @@
 
 export const SWDC_SERVICE_PATH = '/backend/raw/core/W7LegacyProxyVerticle/odata/svt/swdcuisap4mesrv';
 export const SWDC_PAGE_SIZE = 500;
+export const DEFAULT_MAX_NOTES = 100;
+export const MAX_PACKAGE_NOTES = 5000;
 
 export type SupportPackageSection = 'notes' | 'sideEffects' | 'conditions' | 'objects';
 
@@ -119,7 +121,7 @@ export function mapSearchCandidates(payload: unknown): SupportPackageCandidate[]
       description: text(row.Description),
       type: text(row.Infotype)
     }))
-    .filter(candidate => candidate.objectKey !== '');
+    .filter(candidate => isObjectKey(candidate.objectKey));
 }
 
 /** Search is fuzzy. Only a unique exact name identifies the requested package. */
@@ -143,7 +145,8 @@ export interface SupportPackageHeader {
 }
 
 export function mapHeader(payload: unknown, objectKey: string): SupportPackageHeader {
-  const d = asRecord(asRecord(payload)?.d) ?? {};
+  const d = asRecord(asRecord(payload)?.d);
+  if (!d || (!text(d.FileName) && !text(d.Title))) throw new Error('Software Download Center did not return a package header for this object key');
   return {
     objectKey,
     name: text(d.FileName) || objectKey,
@@ -249,9 +252,12 @@ export function filterNotesByComponent(
   notes: SupportPackageNote[],
   componentPrefix?: string
 ): SupportPackageNote[] {
-  const prefix = componentPrefix?.trim().toUpperCase();
+  const prefix = componentPrefix?.trim().toUpperCase().replace(/-+$/, '');
   if (!prefix) return notes;
-  return notes.filter(note => note.component.toUpperCase().startsWith(prefix));
+  return notes.filter(note => {
+    const component = note.component.toUpperCase();
+    return component === prefix || component.startsWith(prefix + '-');
+  });
 }
 
 export interface SupportPackageContent {
@@ -303,7 +309,7 @@ export function formatSupportPackageContent(content: SupportPackageContent, comp
     for (const note of content.notes) {
       lines.push(`- ${note.id} v${note.version} [${note.component}] ${note.title} — ${note.category}; ${note.priority}`);
     }
-    if (content.truncated?.notes) lines.push('_(list truncated — component counts cover the loaded notes only; raise maxNotes for more)_');
+    if (content.truncated?.notes) lines.push('_(partial list — component counts describe the returned notes. Narrow the component or increase maxNotes, up to 5000.)_');
     lines.push('');
   }
 

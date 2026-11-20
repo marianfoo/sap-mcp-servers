@@ -252,7 +252,7 @@ Lists what an SAP Support Package delivers — the same data as SAP for Me → S
 | `package` | SP name as shown in the download center (e.g. `SAPKE608G4`, `SAPK-60899INSAPHRCDE`) or the numeric download object key |
 | `include` | `notes` (default), `sideEffects`, `conditions`, `objects` |
 | `component` | Optional component prefix filter for notes, e.g. `PY-DE` |
-| `maxNotes` / `maxObjects` | Upper bounds (defaults 2000 / 300) |
+| `maxNotes` / `maxObjects` | Maximum notes and objects returned (defaults 100 / 300). A component filter searches up to 5000 notes before applying the output limit. |
 | `lang` | `EN` (default) or `DE` for priority/category texts |
 
 Uses the `swdcuisap4mesrv` OData service behind me.sap.com with the same session as `fetch`; your S-user needs
