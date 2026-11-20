@@ -85,11 +85,11 @@ describe('CertHttpsClient', () => {
       'GET softwaredownloads.sap.com/ -> 200'
     ]);
     expect(seen[1].body?.toString()).toBe('SAMLRequest=R');
-    expect(seen[1].headers['Content-Type']).toBe('application/x-www-form-urlencoded');
-    expect(seen[2].headers.Cookie).toBe('SP=1');
+    expect(seen[1].headers['content-type']).toBe('application/x-www-form-urlencoded');
+    expect(seen[2].headers.cookie).toBe('SP=1');
     expect(seen[3].method).toBe('GET');
     expect(seen[3].body).toBeUndefined();
-    expect(seen[3].headers.Cookie).toBe('SP=1; SESSION=3');
+    expect(seen[3].headers.cookie).toBe('SP=1; SESSION=3');
   });
 
   it('stops at an HTML page that is not an auto-submit form and returns it', async () => {
@@ -110,8 +110,8 @@ describe('CertHttpsClient', () => {
 
     const page = () => ({ status: 200, headers: { 'content-type': 'text/html' }, body: SAML_PAGE('/again', { SAMLRequest: '1' }) });
     const forms = scripted(Array.from({ length: 10 }, () => page));
-    const res = await new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport: forms.transport, maxFormSteps: 2 }).fetch('https://a.sap.com/');
-    expect(res.hops).toHaveLength(3);
+    await expect(new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport: forms.transport, maxFormSteps: 2 }).fetch('https://a.sap.com/')).rejects.toThrow(/Too many SAML form steps/);
+    expect(forms.seen).toHaveLength(3);
   });
 
   it('logs hops without query strings or form values', async () => {
@@ -136,7 +136,7 @@ describe('CertHttpsClient', () => {
     await client.fetch('https://a.sap.com/');
     client.reset();
     await client.fetch('https://a.sap.com/');
-    expect(seen[1].headers.Cookie).toBeUndefined();
+    expect(seen[1].headers.cookie).toBeUndefined();
   });
 });
 
@@ -169,8 +169,8 @@ describe('approuter login', () => {
     expect(await client.approuterLogin(RESOURCE, APPROUTER_PAGE)).toBe(true);
     expect(seen[0].url.toString()).toBe(`${XSUAA}/oauth/authorize?response_type=code&client_id=c&state=s`);
     const callback = seen.find(s => s.url.pathname === '/login/callback')!;
-    expect(callback.headers.Cookie).toContain('signature=sig%3D');
-    expect(callback.headers.Cookie).toContain(`locationAfterLogin=${encodeURIComponent('/sap/opu/odata/sap/SRV/Set?$format=json')}`);
+    expect(callback.headers.cookie).toContain('signature=sig%3D');
+    expect(callback.headers.cookie).toContain(`locationAfterLogin=${encodeURIComponent('/sap/opu/odata/sap/SRV/Set?$format=json')}`);
     expect(client.jar.header(new URL(RESOURCE))).toContain('JSESSIONID=ok');
   });
 
@@ -222,5 +222,29 @@ describe('trusted destinations', () => {
     const client = new CertHttpsClient({ pfx: Buffer.alloc(0), transport });
     await expect(client.fetch('https://accounts.sap.com/')).rejects.toThrow(/Refusing/);
     expect(seen).toHaveLength(1);
+  });
+});
+
+describe('redirect request semantics', () => {
+  it.each([
+    ['HEAD', 302, 'HEAD'], ['POST', 302, 'GET'], ['PATCH', 303, 'GET'],
+    ['POST', 307, 'POST'], ['PUT', 308, 'PUT'], ['PUT', 301, 'PUT']
+  ] as const)('%s + %i follows with %s', async (method, status, expected) => {
+    const { transport, seen } = scripted([
+      () => ({ status, headers: { location: 'https://b.sap.com/end' } }), () => ({ status: 200 })
+    ]);
+    const client = new CertHttpsClient({ pfx: Buffer.alloc(0), trustedOrigins: TEST_ORIGINS, transport });
+    await client.fetch('https://a.sap.com/', { method, body: method === 'HEAD' ? undefined : '{}',
+      headers: { authorization: 'fixture', 'content-type': 'application/json' } });
+    expect(seen[0].headers['content-type']).toBe('application/json');
+    expect(seen[1].method).toBe(expected);
+    expect(seen[1].headers.authorization).toBeUndefined();
+    if (expected === 'POST' || expected === 'PUT') {
+      expect(seen[1].body?.toString()).toBe('{}');
+      expect(seen[1].headers['content-type']).toBe('application/json');
+    } else {
+      expect(seen[1].body).toBeUndefined();
+      expect(seen[1].headers['content-type']).toBeUndefined();
+    }
   });
 });

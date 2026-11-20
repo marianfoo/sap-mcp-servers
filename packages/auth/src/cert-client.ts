@@ -92,14 +92,12 @@ export class CookieJar {
 }
 
 function decodeEntities(s: string): string {
-  return s
-    .replace(/&#x([0-9a-f]+);/gi, (_, x) => String.fromCodePoint(parseInt(x, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&');
+  const named: Record<string, string> = { quot: '"', apos: "'", lt: '<', gt: '>', amp: '&' };
+  return s.replace(/&(?:#x([0-9a-f]+)|#(\d+)|(quot|apos|lt|gt|amp));/gi, (match, hex, decimal, name) => {
+    if (name) return named[name.toLowerCase()];
+    const code = hex ? Number.parseInt(hex, 16) : Number(decimal);
+    return code <= 0x10ffff ? String.fromCodePoint(code) : match;
+  });
 }
 
 function attributes(tag: string): Map<string, string> {
@@ -249,12 +247,16 @@ export class CertHttpsClient {
     const hops: string[] = [];
     let res = await this.follow(new URL(url), options, hops);
     if (options.walkForms === false) return res;
-    for (let step = 0; step < this.maxFormSteps && isHtml(res.headers) && res.status < 400; step++) {
+    for (let step = 0; isHtml(res.headers) && res.status < 400; step++) {
       const html = await readAll(res.body, MAX_HTML);
       const form = parseAutoPostForm(html.toString('utf8'));
       if (!form) return { ...res, body: Readable.from([html]) };
+      if (step >= this.maxFormSteps) throw new Error('Too many SAML form steps');
+      if (!['GET', 'HEAD'].includes((options.method ?? 'GET').toUpperCase())) {
+        throw new Error('Sign in using a GET request before submitting a request with this method');
+      }
       const target = new URL(form.action, res.url);
-      if (target.protocol !== 'https:') throw new Error(`Refusing to post a SAML form to ${target.protocol}//${target.host}`);
+      this.checkOrigin(target);
       const body = new URLSearchParams(form.fields).toString();
       this.logger?.info(`SAML form step ${step + 1}: ${form.method} ${target.host}${target.pathname} (${form.fields.length} field(s))`);
       res = form.method === 'GET'
@@ -298,8 +300,9 @@ export class CertHttpsClient {
         res.body.destroy();
         return returnedToApp;
       }
-      const meta = metaRedirect((await readAll(res.body, MAX_HTML)).toString('utf8'));
-      if (!meta) return returnedToApp;
+      const html = (await readAll(res.body, MAX_HTML)).toString('utf8');
+      const meta = metaRedirect(html);
+      if (!meta) return returnedToApp && !parseApprouterPage(html);
       next = new URL(meta, res.url);
     }
     return false;
@@ -319,17 +322,19 @@ export class CertHttpsClient {
   }
 
   private async follow(url: URL, options: RequestOptions, hops: string[]): Promise<CertResponse> {
-    let requestHeaders = options.headers;
+    let requestHeaders: Record<string, string> = Object.fromEntries(
+      Object.entries(options.headers ?? {}).map(([name, value]) => [name.toLowerCase(), value])
+    );
     let method = (options.method ?? 'GET').toUpperCase();
     let body = typeof options.body === 'string' ? Buffer.from(options.body) : options.body;
     for (let n = 0; ; n++) {
       this.checkOrigin(url);
-      const headers: Record<string, string> = { 'User-Agent': this.userAgent, Accept: '*/*', ...requestHeaders };
+      const headers: Record<string, string> = { 'user-agent': this.userAgent, accept: '*/*', ...requestHeaders };
       const cookie = this.jar.header(url);
-      if (cookie) headers.Cookie = cookie;
+      if (cookie) headers.cookie = cookie;
       if (body) {
-        headers['Content-Type'] ??= 'application/x-www-form-urlencoded';
-        headers['Content-Length'] = String(body.length);
+        headers['content-type'] ??= 'application/x-www-form-urlencoded';
+        headers['content-length'] = String(body.length);
       }
       const res = await this.transport({ method, url, headers, body });
       this.jar.store(url, res.headers['set-cookie']);
@@ -341,9 +346,14 @@ export class CertHttpsClient {
       await drain(res.body);
       if (n >= this.maxRedirects) throw new Error(`Too many redirects, last at ${url.host}${url.pathname}`);
       const next = new URL(location, url);
-      if (next.origin !== url.origin) requestHeaders = undefined;
+      if (next.origin !== url.origin) {
+        requestHeaders = body ? { 'content-type': headers['content-type'] } : {};
+      }
       url = next;
-      if (res.status !== 307 && res.status !== 308) {
+      if ((res.status === 303 && method !== 'HEAD') || ((res.status === 301 || res.status === 302) && method === 'POST')) {
+        for (const name of ['content-length', 'content-type', 'content-encoding', 'content-language', 'content-location']) {
+          delete requestHeaders[name];
+        }
         method = 'GET';
         body = undefined;
       }

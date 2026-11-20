@@ -196,6 +196,8 @@ the final response; `open()` leaves its body a stream, for downloads. One in-mem
 visible field, such as a login form, is returned instead of posted. The logger gets each form step
 and hop as method, host, path and status: never a query string, cookie or form value.
 
+To fetch large HTML documents, set `walkForms: false`. Automatic form detection reads up to 2 MiB of HTML. Caller headers apply to the initial origin. Establish the session with a GET before a write or a ranged download, then send the intended method and headers to the resource.
+
 A BTP app behind an approuter needs one more step. Without a session, it answers with a page whose
 script sets cookies and sends the browser to XSUAA. The XSUAA login page names its identity provider
 in a meta redirect. `approuterLogin(target, page)` takes that page and does both steps in code. The
