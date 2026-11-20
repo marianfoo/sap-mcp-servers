@@ -91,8 +91,8 @@ Env contract (read by `auth/src/auth-config.ts` → `loadAuthConfigFromEnv`):
 | `AUTH_METHOD` | `auto` \| `password` \| `certificate` (`auto` prefers user/pass, falls back to PFX) | `auto` |
 | `SAP_USERNAME` / `SAP_PASSWORD` | IAS form login (same SAP Universal ID / S-user for all three) | — |
 | `PFX_PATH` / `PFX_PASSPHRASE` | SAP Passport client-certificate auth | — |
-| `SAP_LOGIN_URL` | first page opened to trigger SSO | `https://me.sap.com/home` |
-| `SAP_SSO_STORAGE_STATE` | shared SSO session file — set the **same absolute path** in all three to log in once | `~/.sap-mcp/sso-storage-state.json` |
+| `SAP_LOGIN_URL` | first page opened for Notes/Roadmap SSO | `https://me.sap.com/home` |
+| `SAP_SSO_STORAGE_STATE` | shared SSO session file — used by Notes and Roadmap; API Hub uses its own service cache | `~/.sap-mcp/sso-storage-state.json` |
 | `MAX_JWT_AGE_H` (or `MAX_COOKIE_AGE_H`) | cached session lifetime, hours | `12` |
 | `HEADFUL` | show the browser (needed for first login / MFA) | `false` |
 
