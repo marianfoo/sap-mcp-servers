@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.4](https://github.com/marianfoo/sap-mcp-servers/compare/sap-mcp-auth-v0.1.3...sap-mcp-auth-v0.1.4) (2026-11-20)
+
+
+### Features
+
+* **auth:** CertHttpsClient, a browserless client-certificate login ([#102](https://github.com/marianfoo/sap-mcp-servers/issues/102)) ([74d108a](https://github.com/marianfoo/sap-mcp-servers/commit/74d108aa86e347934e2fff09193cb1a9e02f115a))
+
+
+### Bug Fixes
+
+* **auth:** complete interactive sign-in at the target SAP service ([#106](https://github.com/marianfoo/sap-mcp-servers/issues/106)) ([58e4804](https://github.com/marianfoo/sap-mcp-servers/commit/58e48040dd2efae04ff5a32d5a51ff2eb3ba78b6))
+
 ## [0.1.3](https://github.com/marianfoo/sap-mcp-servers/compare/sap-mcp-auth-v0.1.2...sap-mcp-auth-v0.1.3) (2026-10-17)
 
 
