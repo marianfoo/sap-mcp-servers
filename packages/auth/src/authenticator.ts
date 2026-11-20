@@ -271,7 +271,8 @@ export class SapWebAuthenticator {
         dialog.dismiss().catch(() => {});
       });
 
-      const deadline = Date.now() + this.config.mfaTimeout;
+      const configuredTimeout = this.config.mfaTimeout;
+      const deadline = Date.now() + (Number.isFinite(configuredTimeout) ? Math.max(0, configuredTimeout) : 180_000);
       if (authMethod === 'password') {
         await performPasswordLogin(this.page, this.config, this.profile, this.log);
       } else if (authMethod === 'certificate') {
@@ -313,8 +314,8 @@ export class SapWebAuthenticator {
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
         throw new AuthenticationError(cookieHeader
-          ? `${this.profile.serviceName} login produced cookies, but the service still rejected the session. Verify service access and complete SAP sign-in.`
-          : `${this.profile.serviceName} login completed but no cookies were captured for the configured scope`);
+          ? `${this.profile.serviceName} login produced cookies, but the service still rejected the session. Verify service access and complete SAP sign-in with HEADFUL=true, or configure PFX_PATH and PFX_PASSPHRASE.`
+          : `${this.profile.serviceName}: no service cookies were captured. Complete SAP sign-in in the browser before the timeout.`);
       }
       await page.waitForTimeout(Math.min(3000, remaining));
     }

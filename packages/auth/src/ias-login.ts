@@ -423,10 +423,18 @@ export async function performInteractiveLogin(
   }
 
   // The identity provider login can succeed before the application has issued its cookies.
+  logger.warn(`Sign in to ${profile.serviceName} in the browser window. Select Log On if the service opens a public page.`);
   for (const target of targets) {
-    logger.warn(`Opening SAP login page for manual sign-in: ${target}`);
+    logger.warn(`Opening ${target} for interactive sign-in`);
     await openAuthPage(page, target, 'SAP login', logger);
-    while (isOnAuthPage(page.url(), await page.title())) {
+    for (;;) {
+      if (page.isClosed()) throw new AuthenticationError('Browser window closed before SAP sign-in completed');
+      const title = await page.title().catch((error: Error) => {
+        // A redirect can replace the document while Playwright reads its title.
+        if (/execution context was destroyed|navigation/i.test(error.message)) return null;
+        throw error;
+      });
+      if (title !== null && !isOnAuthPage(page.url(), title)) break;
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new AuthenticationError('Manual SAP login did not complete before the timeout');
       await page.waitForTimeout(Math.min(500, remaining));

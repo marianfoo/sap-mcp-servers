@@ -63,11 +63,15 @@ for (const sharedLogin of [true, false]) {
       const browser = await chromium.launch();
       const create = browser.newContext.bind(browser);
       browser.newContext = async options => {
-        if (!sharedLogin) assert.equal(options.storageState, undefined);
+        if (!sharedLogin) assert.equal(options?.storageState, undefined);
         const context = await create(options);
-        await context.route('**/*', route => {
+        await context.route('**/*', async route => {
           if (route.request().isNavigationRequest()) visited.push(route.request().url());
           if (!sharedLogin) return route.fulfill({ contentType: 'text/html', body: '<title>Overview</title><script>setTimeout(() => { document.cookie = "app=ready; Path=/" }, 300)</script>' });
+          if (route.request().url() === start) {
+            return route.fulfill({ contentType: 'text/html', body: '<title>Log On</title><script>setTimeout(() => { document.title = "Welcome"; document.cookie = "idp=ready; Path=/" }, 200)</script>' });
+          }
+          assert.ok((await context.cookies(start)).some(cookie => cookie.name === 'idp'));
           return route.fulfill({ contentType: 'text/html', body: '<title>Signed in</title>',
             headers: { 'set-cookie': route.request().url() === appUrl ? 'app=ready; Path=/' : 'idp=ready; Path=/' } });
         });
