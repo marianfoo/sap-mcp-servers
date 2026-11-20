@@ -88,6 +88,7 @@ export function buildSearchParams(query: string, language?: string): Record<stri
 export interface ODataPage {
   rows: JsonRecord[];
   count: number | null;
+  hasNext?: boolean;
 }
 
 export function readODataPage(payload: unknown): ODataPage {
@@ -97,6 +98,7 @@ export function readODataPage(payload: unknown): ODataPage {
   }
   const count = Number.parseInt(text(d.__count), 10);
   return {
+    ...(d.__next ? { hasNext: true } : {}),
     rows: d.results.map(asRecord).filter((row): row is JsonRecord => row !== null),
     count: Number.isNaN(count) ? null : count
   };
@@ -120,18 +122,14 @@ export function mapSearchCandidates(payload: unknown): SupportPackageCandidate[]
     .filter(candidate => candidate.objectKey !== '');
 }
 
-/**
- * Pick the download object for a package name: exact name match first,
- * otherwise a unique result. Returns null when the choice is ambiguous.
- */
+/** Search is fuzzy. Only a unique exact name identifies the requested package. */
 export function pickCandidate(
   candidates: SupportPackageCandidate[],
   name: string
 ): SupportPackageCandidate | null {
-  const wanted = name.toUpperCase();
-  const exact = candidates.filter(c => c.name.toUpperCase() === wanted);
-  if (exact.length >= 1) return exact[0];
-  return candidates.length === 1 ? candidates[0] : null;
+  const exact = candidates.filter(c => c.name.toUpperCase() === name.toUpperCase());
+  const unique = new Map(exact.map(c => [c.objectKey, c]));
+  return unique.size === 1 ? exact[0] : null;
 }
 
 export interface SupportPackageHeader {
@@ -258,7 +256,7 @@ export function filterNotesByComponent(
 
 export interface SupportPackageContent {
   package: SupportPackageHeader;
-  noteCount: number;
+  noteCount?: number;
   notes?: SupportPackageNote[];
   notesByComponent?: Array<{ component: string; componentName: string; count: number }>;
   sideEffects?: SupportPackageSideEffect[];
@@ -294,7 +292,7 @@ export function formatSupportPackageContent(content: SupportPackageContent, comp
 
   if (content.notes) {
     const shown = content.notes.length;
-    lines.push(`**SAP Notes: ${content.noteCount} in package${componentFilter ? `, ${shown} matching component "${componentFilter}"` : ''}**`);
+    lines.push(`**SAP Notes: ${content.noteCount === undefined ? "total unknown" : `${content.noteCount} in package`}${componentFilter ? `, ${shown} matching component "${componentFilter}"` : ''}**`);
     if (content.notesByComponent?.length) {
       lines.push('By component: ' + content.notesByComponent
         .slice(0, 15)
@@ -305,12 +303,12 @@ export function formatSupportPackageContent(content: SupportPackageContent, comp
     for (const note of content.notes) {
       lines.push(`- ${note.id} v${note.version} [${note.component}] ${note.title} — ${note.category}; ${note.priority}`);
     }
-    if (content.truncated?.notes) lines.push('_(list truncated — raise maxNotes or filter by component)_');
+    if (content.truncated?.notes) lines.push('_(list truncated — component counts cover the loaded notes only; raise maxNotes for more)_');
     lines.push('');
   }
 
   if (content.sideEffects) {
-    lines.push(`**Side effects (${content.sideEffects.length})**`);
+    lines.push(`**Side effects (${content.sideEffects.length}${content.truncated?.sideEffects ? ", partial" : ""})**`);
     for (const se of content.sideEffects) {
       lines.push(`- Note ${se.causingNote} (${se.causingComponent}) → solved by ${se.solvingNote}: ${se.solvingTitle}${se.solvingPackage ? ` [${se.solvingPackage}]` : ''}`);
     }
@@ -318,7 +316,7 @@ export function formatSupportPackageContent(content: SupportPackageContent, comp
   }
 
   if (content.conditions) {
-    lines.push(`**Import conditions (${content.conditions.length})**`);
+    lines.push(`**Import conditions (${content.conditions.length}${content.truncated?.conditions ? ", partial" : ""})**`);
     for (const c of content.conditions) {
       lines.push(`- Set ${c.conditionSet}: ${c.softwareComponent} ${c.release} ${c.type}${c.package ? ` — requires ${c.packageType} ${c.package}` : ''}`);
     }
@@ -326,7 +324,7 @@ export function formatSupportPackageContent(content: SupportPackageContent, comp
   }
 
   if (content.objects) {
-    lines.push(`**Object list (${content.objectCount ?? content.objects.length} objects${content.truncated?.objects ? `, first ${content.objects.length} shown` : ''})**`);
+    lines.push(`**Object list (${content.objectCount ?? "unknown total"} objects${content.truncated?.objects ? `, first ${content.objects.length} shown` : ''})**`);
     for (const o of content.objects) lines.push(`- ${o.pgmId} ${o.objectType} ${o.objectName}`);
     lines.push('');
   }

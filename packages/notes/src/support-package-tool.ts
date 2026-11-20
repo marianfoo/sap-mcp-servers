@@ -77,7 +77,7 @@ export function registerSupportPackageTool(
             component,
             maxNotes,
             maxObjects,
-            language: lang === 'DE' ? 'DE' : 'EN'
+            language: lang
           })
         );
         return {

@@ -256,7 +256,7 @@ Lists what an SAP Support Package delivers — the same data as SAP for Me → S
 | `lang` | `EN` (default) or `DE` for priority/category texts |
 
 Uses the `swdcuisap4mesrv` OData service behind me.sap.com with the same session as `fetch`; your S-user needs
-software download authorization.
+software download authorization. If a name search returns no match, copy the numeric key from the end of the package URL in SAP for Me (`/softwarecenter/object/<key>`) and pass it as `package`.
 
 ### `fetch_attachment` (stdio)
 

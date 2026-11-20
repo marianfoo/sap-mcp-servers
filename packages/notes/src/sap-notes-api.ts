@@ -415,42 +415,40 @@ export class SapNotesApiClient {
     token: string,
     limit: number,
     language?: string
-  ): Promise<{ rows: Record<string, unknown>[]; count: number | null }> {
+  ): Promise<{ rows: Record<string, unknown>[]; count: number | null; truncated: boolean }> {
     const rows: Record<string, unknown>[] = [];
     let count: number | null = null;
-    while (rows.length < limit) {
-      const top = Math.min(SWDC_PAGE_SIZE, limit - rows.length);
+    // One extra row distinguishes an exact fit from a partial result when SAP omits __count.
+    while (rows.length <= limit) {
+      const top = Math.min(SWDC_PAGE_SIZE, limit + 1 - rows.length);
       const page = readODataPage(await this.fetchBackendJson(
-        objectPath(objectKey, navigation),
-        token,
-        buildPageParams(rows.length, top, language)
+        objectPath(objectKey, navigation), token, buildPageParams(rows.length, top, language)
       ));
       count ??= page.count;
-      rows.push(...page.rows);
-      if (page.rows.length < top || (count !== null && rows.length >= count)) break;
+      for (const row of page.rows) rows.push(row);
+      if (page.rows.length === 0 || (count !== null && rows.length >= Math.min(limit, count))) break;
+      if (count === null && page.rows.length < top && !page.hasNext) break;
     }
-    // Some collections (e.g. ObjectList) ignore $top and omit __count: they return
-    // everything at once. Use the fetched size as total and cap what we hand back.
-    const total = count ?? rows.length;
-    return { rows: rows.slice(0, limit), count: total };
+    const truncated = (count ?? rows.length) > limit || (count !== null && rows.length < count);
+    return { rows: rows.slice(0, limit), count: count ?? (truncated ? null : rows.length), truncated };
   }
 
   /** Resolve a support package name (e.g. SAPKE608G4) to its download object key. */
-  async resolveSupportPackage(nameOrKey: string, token: string): Promise<string> {
+  async resolveSupportPackage(nameOrKey: string, token: string, language?: string): Promise<string> {
     const input = normalizePackageInput(nameOrKey);
     if (isObjectKey(input)) return input;
 
     const candidates = mapSearchCandidates(
-      await this.fetchBackendJson(`${SWDC_SERVICE_PATH}/SearchResultSet`, token, buildSearchParams(input))
+      await this.fetchBackendJson(`${SWDC_SERVICE_PATH}/SearchResultSet`, token, buildSearchParams(input, language))
     );
     const match = pickCandidate(candidates, input);
     if (match) return match.objectKey;
 
     if (candidates.length === 0) {
-      throw new Error(`No download object found for "${input}" in the SAP Software Download Center (check the name or your download authorization).`);
+      throw new Error(`No download object found for "${input}" in SAP Software Download Center search. Check the spelling, or pass the numeric key at the end of the package’s SAP for Me /softwarecenter/object/ URL.`);
     }
     const list = candidates.slice(0, 10).map(c => `${c.name} (${c.description}, ${c.type}, key ${c.objectKey})`).join('; ');
-    throw new Error(`"${input}" is ambiguous. Candidates: ${list}. Pass the exact package name or the object key.`);
+    throw new Error(`No unique exact match for "${input}". Candidates: ${list}. Pass the exact package name or the object key.`);
   }
 
   /**
@@ -470,10 +468,10 @@ export class SapNotesApiClient {
   ): Promise<SupportPackageContent> {
     const include = new Set<SupportPackageSection>(options.include?.length ? options.include : ['notes']);
     const maxNotes = options.maxNotes ?? 2000;
-    const maxObjects = options.maxObjects ?? 500;
+    const maxObjects = options.maxObjects ?? 300;
     const language = options.language;
 
-    const objectKey = await this.resolveSupportPackage(nameOrKey, token);
+    const objectKey = await this.resolveSupportPackage(nameOrKey, token, language);
     const header = mapHeader(
       await this.fetchBackendJson(objectPath(objectKey), token, language ? { $format: 'json', 'sap-language': language } : { $format: 'json' }),
       objectKey
@@ -481,38 +479,38 @@ export class SapNotesApiClient {
 
     const content: SupportPackageContent = {
       package: header,
-      noteCount: 0,
       url: `https://me.sap.com/softwarecenter/object/${objectKey}`
     };
     const truncated: SupportPackageContent['truncated'] = {};
 
     if (include.has('notes')) {
-      // Always load all notes so component filtering and counts are complete.
-      const { rows, count } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.notes, token, maxNotes, language);
+      const { rows, count, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.notes, token, maxNotes, language);
       const all = rows.map(mapNote).sort((a, b) =>
         a.component.localeCompare(b.component) || a.id.localeCompare(b.id, undefined, { numeric: true }));
-      content.noteCount = count ?? all.length;
+      if (count !== null) content.noteCount = count;
       content.notes = filterNotesByComponent(all, options.component);
       content.notesByComponent = summarizeByComponent(content.notes);
-      if (count !== null && rows.length < count) truncated.notes = true;
+      if (partial) truncated.notes = true;
     }
     if (include.has('sideEffects')) {
-      const { rows } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.sideEffects, token, 2000, language);
+      const { rows, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.sideEffects, token, 2000, language);
       content.sideEffects = rows.map(mapSideEffect);
+      if (partial) truncated.sideEffects = true;
     }
     if (include.has('conditions')) {
-      const { rows } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.conditions, token, 500, language);
+      const { rows, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.conditions, token, 500, language);
       content.conditions = rows.map(mapCondition);
+      if (partial) truncated.conditions = true;
     }
     if (include.has('objects')) {
-      const { rows, count } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.objects, token, maxObjects, language);
+      const { rows, count, truncated: partial } = await this.fetchSwdcCollection(objectKey, SECTION_NAVIGATION.objects, token, maxObjects, language);
       content.objects = rows.map(mapObject);
-      content.objectCount = count ?? rows.length;
-      if (count !== null && rows.length < count) truncated.objects = true;
+      if (count !== null) content.objectCount = count;
+      if (partial) truncated.objects = true;
     }
     if (Object.keys(truncated).length) content.truncated = truncated;
 
-    logger.info(`✅ Retrieved support package ${header.name}: ${content.noteCount} note(s)`);
+    logger.info(`✅ Retrieved support package ${header.name}: ${content.notes?.length ?? 0} returned note(s)`);
     return content;
   }
 

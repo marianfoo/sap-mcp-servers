@@ -42,14 +42,16 @@ test('page params always carry an explicit $top (the service returns nothing wit
   assert.equal(buildSearchParams('SAPKE608G4').SEARCH_STRING, 'SAPKE608G4');
 });
 
-test('search candidates resolve exact names, unique hits, and flag ambiguity', () => {
+test('search candidates resolve only unique exact package names', () => {
   const candidates = mapSearchCandidates({ d: { results: [
     { Id: '000001', Title: 'SAPKE608G4', Description: 'SAP_HR 608: SP 0164', Infotype: 'Support Package', Fastkey: '0010000001004222026' },
     { Id: '000002', Title: 'SAPKE608G3', Description: 'SAP_HR 608: SP 0163', Infotype: 'Support Package', Fastkey: '0010000001004222025' }
   ] } });
   assert.equal(pickCandidate(candidates, 'SAPKE608G4').objectKey, '0010000001004222026');
   assert.equal(pickCandidate(candidates, 'SAPKE608'), null);
-  assert.equal(pickCandidate(candidates.slice(0, 1), 'SAP_HR 608 SP 164').objectKey, '0010000001004222026');
+  assert.equal(pickCandidate(candidates.slice(0, 1), 'SAPKE608G'), null);
+  assert.equal(pickCandidate([candidates[0], candidates[0]], 'SAPKE608G4'), candidates[0]);
+  assert.equal(pickCandidate([candidates[0], { ...candidates[0], objectKey: 'other' }], 'SAPKE608G4'), null);
 });
 
 test('readODataPage parses counts and rejects malformed payloads', () => {
@@ -101,4 +103,44 @@ test('formatter renders header, notes and truncation hint', () => {
   assert.match(text, /462 in package, 1 matching component "BC"/);
   assert.match(text, /- 3758752 v3 \[BC-BMT-OM\] PPOME/);
   assert.match(text, /truncated/);
+});
+
+test('an omitted total and a component beyond the fetch limit are reported as partial', async () => {
+  const { SapNotesApiClient } = await import('../dist/sap-notes-api.js');
+  const client = Object.create(SapNotesApiClient.prototype);
+  const key = '0010000001004222026';
+  const input = [{ Number: '1', Component: 'BC' }, { Number: '2', Component: 'PY' }];
+  client.fetchBackendJson = async (path, token, params) => path.endsWith('/ObjectSAPNotes')
+    ? { d: { results: input.slice(+params.$skip, +params.$skip + +params.$top) } }
+    : { d: { Title: 'Package' } };
+  const partial = await client.getSupportPackageContent(key, 'test', { component: 'PY', maxNotes: 1 });
+  assert.deepEqual(partial.notes, []);
+  assert.equal(partial.truncated.notes, true);
+  assert.equal(partial.noteCount, undefined);
+  assert.match(formatSupportPackageContent(partial, 'PY'), /total unknown/);
+  const full = await client.getSupportPackageContent(key, 'test', { component: 'PY', maxNotes: 2 });
+  assert.equal(full.noteCount, 2);
+  assert.equal(full.notes.length, 1);
+  assert.equal(full.truncated, undefined);
+});
+
+test('paged collections respect the reported count, the caller limit, and short server pages', async () => {
+  const { SapNotesApiClient } = await import('../dist/sap-notes-api.js');
+  const client = Object.create(SapNotesApiClient.prototype);
+  for (const [limit, counted, expectedOffsets] of [
+    [2000, true, [0, 500, 1000]], [600, true, [0, 500]], [750, false, [0, 300, 600]]
+  ]) {
+    const offsets = [];
+    client.fetchBackendJson = async (_path, _token, params) => {
+      const skip = Number(params.$skip);
+      const length = Math.min(Number(params.$top), counted ? 500 : 300, 1200 - skip);
+      offsets.push(skip);
+      return { d: { results: Array.from({ length }, () => ({})), ...(counted ? { __count: '1200' } : { __next: 'more' }) } };
+    };
+    const result = await client.fetchSwdcCollection('123', 'ObjectSAPNotes', 'test', limit);
+    assert.deepEqual(offsets, expectedOffsets);
+    assert.equal(result.rows.length, Math.min(1200, limit));
+    assert.equal(result.truncated, limit < 1200);
+    assert.equal(result.count, counted ? 1200 : null);
+  }
 });
