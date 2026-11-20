@@ -24,6 +24,7 @@ import {
   SAP_NOTE_GET_DESCRIPTION
 } from './schemas/sap-notes.js';
 import { parseNoteContent } from './html-utils.js';
+import { registerSupportPackageTool } from './support-package-tool.js';
 import { escapeSseLineSeparators } from './sse-line-separators.js';
 
 // Get the directory of this module for resolving paths
@@ -414,6 +415,8 @@ class HttpSapNoteMcpServer {
       }
     );
 
+    registerSupportPackageTool(mcp, this.sapNotesClient, fn => this.withAuthRetry(fn));
+
     return mcp;
   }
 
@@ -428,7 +431,7 @@ class HttpSapNoteMcpServer {
         server: 'sap-note-search-mcp',
         version: SERVER_VERSION,
         protocol: 'streamable-http',
-        tools: ['search', 'fetch']
+        tools: ['search', 'fetch', 'support_package_notes']
       });
     });
 

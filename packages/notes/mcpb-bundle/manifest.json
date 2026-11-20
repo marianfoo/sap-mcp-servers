@@ -58,6 +58,10 @@
     {
       "name": "fetch_attachment",
       "description": "Download an SAP Note attachment to a new local file without overwriting existing files."
+    },
+    {
+      "name": "support_package_notes",
+      "description": "List the SAP Notes, side-effect solutions, import conditions and object list delivered with an SAP Support Package (e.g. SAPKE608G4)."
     }
   ],
   "keywords": [
